@@ -14,6 +14,7 @@
 ; 0xA000 to 0xA0FF: reserved command input buffer.
 
 jsr loader
+
 :PACOS_main_loop
 JSR PACOS_command_scan
 SET A, 0xA000
@@ -27,12 +28,23 @@ SET PC, PACOS_main_loop
     JSR printLine
 :HLT SET PC, HLT
 
+:root DAT "root", 0x0000
+
 ;void loader(void)
-:loader
-    SET Z, 0x8000
+:loader    
+    SET Z, 0x8000               ; SETUP MONITOR I/O
     SET A, PACOS_welcome
     JSR printLine
 
+    SET A, _.FS                 ; SETUP FILE SYSTEM
+    SET [_FS_DIR_START], A
+    ADD A, 0x2000
+    SET [_FS_DAT_START], A
+    
+    SET A, root                 ; CREATE ROOT DIRECTORY AND SET CD
+    JSR mkdir
+    SET [CD], A
+    
     SET PC, POP
 
 ;void PACOS_command_scan(void)
@@ -40,9 +52,17 @@ SET PC, PACOS_main_loop
     SET X, 0xA000							; Reset command buffer
     SET Y, [PACOS_key_pointer]				; Load up key pointer
     
-    SET [VAR_PRINT_COL] 0x9000				; Text output to blue
+    SET [VAR_PRINT_COL], 0x9000				; Text output to blue
+    
+    SET A, [CD]                             ; Display current directory
+    ADD A, 1
+    SET B, 10
+    JSR printDChar
+        
     SET A, PACOS_prompt						; Display the command prompt
     JSR print    
+    
+    SET [VAR_PRINT_COL], 0xF000				; Text output back to white
     
     :_wait__PACOS_command_scan
     IFE [Y], 0x000							; Wait for a key press (ie a change from NULL)
@@ -220,6 +240,91 @@ SET PC, PACOS_main_loop
 	SET A, 0x0054
 	JSR printChar
     SET PC, POP
+    
+    
+;A dchar* stringToDChar(A string* target, B out dchar* location)
+; Compress a standard string into dchar format
+:stringToDChar
+    SET PUSH, A
+    SET PUSH, B
+    SET PUSH, X
+    SET PUSH, Y
+    SET PUSH, Z
+
+    SET Z, B
+    SET B, A
+    ADD B, 1    
+    
+    :_loop__stringToDChar
+    SET X, [A]
+    SET Y, [B]
+    SHL X, 8        ; shift char value to high byte
+    AND X, 0xFF00   ; clear bottom byte
+    AND Y, 0x00FF   ; clear top byte
+    
+    IFE X, 0x0000
+      SET PC, _done__stringToDChar
+    IFE Y , 0x0000
+      SET PC, _shortFinish__stringToDChar
+
+    BOR X, Y        ; combine two halfs
+    SET [Z], X      ; save compressed word.
+    
+    ADD A, 2
+    ADD B, 2
+    ADD Z, 1
+    SET PC, _loop__stringToDChar
+    
+    :_shortFinish__stringToDChar
+    SET [Z], X
+    SET PC, _return__stringToDChar
+    
+    :_done__stringToDChar
+    SET [Z], 0x0000
+    
+    :_return__stringToDChar
+    SET Z, POP
+    SET Y, POP
+    SET X, POP
+    SET B, POP
+    SET A, POP
+    SET PC, POP
+    
+    
+;void pringDChar(A dchar* message, B uint maxLength)
+; prints the dchar pointed to by message. Additionally, specify a max length that
+; printing will stop after even if no NULL character is reached.
+:printDChar
+    SET PUSH, I
+    SET I, A
+    
+    :_loop__printDChar
+    SET A, [I]          
+    SHR A, 8    
+    IFE A, 0x0000                     ; High character
+    SET PC, _done__printDChar
+    JSR printChar
+    
+    SUB B, 1                          ; check if maxLength reached
+    IFE B, 0x0000
+    SET PC, _done__printDChar
+    
+    SET A, [I]
+    AND A, 0x00FF
+    IFE A, 0x0000                     ; Low character
+    SET PC, _done__printDChar
+    JSR printChar
+    
+    SUB B, 1                          ; check if maxLength reached
+    IFE B, 0x0000
+    SET PC, _done__printDChar
+    
+    ADD I, 1
+    SET PC, _loop__printDChar
+
+    :_done__printDChar
+    SET I, POP    
+    SET PC, POP
 
 
 ;void clr(void)
@@ -312,6 +417,41 @@ SET PC, PACOS_main_loop
     SET PC, POP
 
 
+    
+;A inode* mkdir(A string* name)
+; Create a new inode in the first available slot in the dir sector.
+:mkdir
+    SET PUSH, I
+    SET PUSH, X
+
+    SET I, [_FS_DIR_START]
+    :_loop__mkdir
+    SET X, [I]
+    AND X, 0x8000           ; used bit
+    IFE X, 0x0000
+    SET PC, _found__mkdir
+    ADD I, [_FS_DIR_SIZE]
+    SET PC, _loop__mkdir
+
+    :_found__mkdir
+    SET [I], 0xD000    ;Set status word
+    SET B, I
+    ADD B, 1
+    JSR stringToDChar  ; Convert and copy name
+    ADD B, 5
+    SET [B], 0x0000     ; Clear both data words.
+    ADD B, 1
+    SET [B], 0x0000
+
+
+    SET A, I           ;return inode address
+    SET X, POP
+    SET I, POP
+    SET PC, POP
+    
+    
+    
+    
 ;void com_echo(void)
 ; Parses the current command buffer assuming echo command format.
 :com_echo
@@ -334,7 +474,7 @@ SET PC, PACOS_main_loop
 			dat "Available Commands:", 0x000A
             dat "help, echo [text], exit", 0x0000
             
-:PACOS_prompt dat 0xFFFF, 0x9000, "> ", 0x0000
+:PACOS_prompt dat 0xFFFF, 0x9000, "$ ", 0x0000
 :PACOS_welcome dat 0xFFFF, 0xA000, "PaC OS Ready.", 0x000A
                dat "Type help for a list of commands", 0x0000
 :PACOS_invalid dat 0xFFFF, 0xC000, "Unknown Command", 0x0000
@@ -342,9 +482,18 @@ SET PC, PACOS_main_loop
 :PACOS_key_pointer dat 0x9000
 
 :_.COMMANDS
-:PACOScom_exit dat "exit", 0x0000
-:PACOScom_echo dat "echo", 0x0020
-:PACOScom_help dat "help", 0x0000
+:PACOScom_exit dat "EXIT", 0x0000
+:PACOScom_echo dat "ECHO", 0x0020
+:PACOScom_help dat "HELP", 0x0000
 :_.END_COMMANDS dat 0xFFFE
 
 
+:_.FS_HEADER
+    :CD            DAT 0     ; current directory inode pointer
+    :_FS_DIR_SIZE  DAT 8
+    :_FS_DAT_SIZE  DAT 32
+    :_FS_DIR_COUNT DAT 1024  ; 0x2000 memory space
+    :_FS_DAT_COUNT DAT 512   ; 0x4000 memory space
+    :_FS_DIR_START DAT 0
+    :_FS_DAT_START DAT 0
+:_.FS
