@@ -28,8 +28,8 @@ SET PC, PACOS_main_loop
     JSR printLine
 :HLT SET PC, HLT
 
-:root DAT "ROOT", 0x0000
-:bin DAT "BIN", 0x0000
+:rootname DAT "/", 0x0000
+:binname DAT "BIN", 0x0000
 
 ;void loader(void)
 :loader    
@@ -43,11 +43,12 @@ SET PC, PACOS_main_loop
     SET [_FS_DAT_START], A
     SUB [_FS_SP_MAX], 1
     
-    SET A, root                 ; CREATE ROOT DIRECTORY AND SET CD
+    SET A, rootname             ; CREATE ROOT DIRECTORY AND SET CD
     JSR mkdir
-    SET [CD], A        
+    SET [ROOT], A
+    SET [CD], A
         
-    SET A, bin
+    SET A, binname
     JSR mkdir
     SET J, A
     SET B, A                    ; ADD BIN DIRECTORY TO ROOT
@@ -145,6 +146,18 @@ SET PC, PACOS_main_loop
 :runCommand
 	SET PUSH, X
     SET X, A
+    
+    ;CASE: "cd /"  ;takes precidence over standard cd
+    :_next6__runCommand
+    SET A, X
+    SET B, PACOScom_cdroot
+    SET C, 0x0000
+    JSR compareString
+    IFE A, 0x0000
+    SET PC, _next5__runCommand
+    JSR com_cdroot
+    SET PC, _done__runCommand
+    
     
     ;CASE: "cd"
     :_next5__runCommand
@@ -703,10 +716,18 @@ SET PC, PACOS_main_loop
     SET PC, POP
     
     :_noExist__com_cd
+    SET B, POP
     SET A, invalid__com_cd
     JSR printLine
     SET PC, POP
 :invalid__com_cd DAT "Directory does not exist.", 0x0000
+
+
+;void com_cdroot(void)
+; Sets the CD to the root inode and clears the FS_STACK
+:com_cdroot
+    SET [CD], [ROOT]
+    SET PC, POP
     
     
 
@@ -730,12 +751,14 @@ SET PC, PACOS_main_loop
 :PACOScom_echo dat "ECHO", 0x0020
 :PACOScom_help dat "HELP", 0x0000
 :PACOScom_ls dat "LS", 0x0000
+:PACOScom_cdroot dat "CD /", 0x0000
 :PACOScom_cd dat "CD", 0x0020
 :_.END_COMMANDS dat 0xFFFE
 
 
 :_.FS_HEADER
     :CD            DAT 0     ; current directory inode pointer
+    :ROOT          DAT 0     ; root inode pointer
     :_FS_DIR_SIZE  DAT 8
     :_FS_DAT_SIZE  DAT 32
     :_FS_DIR_COUNT DAT 1024  ; 0x2000 memory space
