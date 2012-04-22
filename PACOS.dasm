@@ -384,16 +384,9 @@ SET PC, PACOS_main_loop
 ;void newLine(void)
 ; Move to next line
 :newLine
-    SET A, Z
-    MOD A, 0x0020
-    IFG A, 0x000F
-    SET PC, _second__newLine
-    ADD Z, 0x0020
-    SET PC, _done__newLine
-    :_second__newLine
-    ADD Z, 0x0010
-    :_done__newLine
-    AND Z, 0x81F0
+    DIV Z, 32
+    ADD Z, 1
+    MUL Z, 32
     IFG Z, 0x817F
     SET PC, _offscreen__newLine
     SET PC, POP
