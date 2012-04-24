@@ -37,7 +37,7 @@ SET PC, PACOS_main_loop
     SET A, PACOS_welcome
     JSR printLine
 
-    SET A, _.FS                 ; SETUP FILE SYSTEM
+    SET A, s_FS                 ; SETUP FILE SYSTEM
     SET [_FS_DIR_START], A
     ADD A, 0x2000
     SET [_FS_DAT_START], A
@@ -731,7 +731,7 @@ SET PC, PACOS_main_loop
     
     
 
-:_.DATA
+:s_DATA
 
 :VAR_PRINT_COL dat 0xF000
 
@@ -746,17 +746,17 @@ SET PC, PACOS_main_loop
 :PACOS_end dat 0xFFFF, 0xC000, "System Shutdown", 0x0000
 :PACOS_key_pointer dat 0x9000
 
-:_.COMMANDS
+:s_COMMANDS
 :PACOScom_exit dat "EXIT", 0x0000
 :PACOScom_echo dat "ECHO", 0x0020
 :PACOScom_help dat "HELP", 0x0000
 :PACOScom_ls dat "LS", 0x0000
 :PACOScom_cdroot dat "CD /", 0x0000
 :PACOScom_cd dat "CD", 0x0020
-:_.END_COMMANDS dat 0xFFFE
+:s_END_COMMANDS dat 0xFFFE
 
 
-:_.FS_HEADER
+:s_FS_HEADER
     :CD            DAT 0     ; current directory inode pointer
     :ROOT          DAT 0     ; root inode pointer
     :_FS_DIR_SIZE  DAT 8
@@ -766,9 +766,9 @@ SET PC, PACOS_main_loop
     :_FS_DIR_START DAT 0
     :_FS_DAT_START DAT 0
     
-:_.FS_STACK
+:s_FS_STACK
     :_FS_SP
     DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0  ; slots for a 20 high stack.
     :_FS_SP_MAX
     
-:_.FS
+:s_FS
