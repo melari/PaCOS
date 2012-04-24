@@ -1,19 +1,30 @@
-
 ; Implementation of the HAT File System for use in PaC OS
 ; As specified by the community DCPU-16 standards
 ; https://github.com/0x10cStandardsCommittee/0x10c-Standards/blob/master/FS/Draft_Harrys_Allocation_Table.txt
 
 ; ===============================
-;       TESTS 
+;       TESTS / USAGE EXAMPLE
 
-JSR HAT_format
-SET A, root_name
+JSR HAT_format          ; format the drive to use HAT
+SET [ROOT], A
+
+SET A, bin_folder   ; Add a bin folder to the root.
+SET B, [ROOT]
 JSR HAT_mkdir
+
+SET A, usr_folder
+SET B, [ROOT]
+JSR HAT_mkdir
+
 
 
 :crash SET PC, crash
 
-:root_name DAT "root", 0x0000
+:ROOT DAT 0x0000, 0x0000
+
+:bin_folder DAT "bin", 0x0000
+:usr_folder DAT "usr", 0x0000
+
 
 ; ================================
 
@@ -23,8 +34,9 @@ JSR HAT_mkdir
 :_.HATdriver
 :HAT_VERSION DAT 0x4001
 
-;void HAT_format(void)
+;A inode* HAT_format(void)
 ; Formats a section of memory to be used as a HAT file system.
+; Returns a pointer to the root inode.
 :HAT_format
 
     ; Set up header information
@@ -37,70 +49,182 @@ JSR HAT_mkdir
     SET [_sectors_start], _.HATsectors
     SET [_sectors_used], 0
     
+    JSR HAT_createDirInode  ; create the root inode.    
     
     SET PC, POP
     
 
-;A inode* HAT_createInode(A string* name)
-; Creates a new inode in the first available sector and returns 
-; a pointer to the created inode. Note that if name exceeds 15 characters
-; the extra will simply be ignored.
-:HAT_mkdir
-    JSR HAT_findFirstSector
-    SET [A], 1    ;mark inode as a directory.
-    ADD A, 1
-    SET [A], 0  ;new inode has no links pointing to it.
-    ADD A, 1
-    SET [A], 0  ;inode is initialized to empty.
-    SUB A, 2
+;A inode* HAT_createInode(void)
+; Creates a new inode in the first available sector of a directory type
+; and returns a pointer to the created inode.
+:HAT_createDirInode    
+    JSR HAT_takeSector
+    SET [A], 1    ;mark inode as a directory.   
+    SET [A+1], 0  ;new inode has no links pointing to it.    
+    SET [A+2], 0  ;inode is initialized to empty.    
+    SET PC, POP
+    
+;A bitmap* HAT_getSectorJoin(A sector* sector)
+; Gets the sector joins bitmap corresponding to the given sector.
+:HAT_getSectorJoin
+    SUB A, [_sectors_start]
+    DIV A, [_sector_size]
+    ADD A, [_sector_joins_start]
+    SET PC, POP
+    
+;A addr HAT_findEnd(A inode* inode)
+; Find the first unoccupied byte in the data area for this given inode. If there is
+; no room left in the sector, a join will be created and the starting address of
+; the new sector will be returned.
+:HAT_findEnd
+    SET PUSH, X
+    SET PUSH, Y    
+    
+    :_loop__findEnd
+    SET X, A
+    JSR HAT_getSectorJoin
+        
+    IFE [A], 0x0000
+    SET PC, _found__findEnd
+    SET A, [A]
+    SET PC, _loop__findEnd
+    
+    :_found__findENd                ; Found last used sector in the stripe.
+    SET A, X
+    ADD A, [X+2]
+    ADD A, 4
+    SET Y, A
+    SUB Y, [_sector_size]
+    IFE Y, X
+    SET PC, _overflow__findEnd
+    SET PC, _done__findEnd
+    
+    :_overflow__findENd             ; Last sector in strip is full, need to reserve a new one.
+    SET A, X
+    JSR HAT_createJoin
+    
+    :_done__findENd
+    SET Y, POP
+    SET X, POP
     SET PC, POP
     
     
-;A sector* HAT_findFirstSector(void)
-; Finds the first unused sector and returns a pointer to it.
-:HAT_findFirstSector
+;A sector* HAT_createJoin(A sector* inode)
+; Reserves a new sector and joins the given sector to it.
+; Returns the address of the new sector.
+:HAT_createJoin
+    SET PUSH, X
+    
+    SET X, A
+    JSR HAT_takeSector          ; Reserve new sector
+    SET PUSH, X
+    SET X, A
+    SET A, POP
+    JSR HAT_getSectorJoin       ; Get the sector join for this sector
+    SET [A], X                  ; Set the sector join for this sector to the new sector
+    
+    SET A, X                    ; Return the new sector address.
+    
+    SET X, POP
+    SET PC, POP
+    
+;void HAT_createLink(A inode* parent, B inode* child, C string* filename)
+; Adds a new link to the given parent inode pointing to the given child
+; inode with the given filename.
+:HAT_createLink
+    SET PUSH, X
+    SET PUSH, Y
+    
+    
+    SET PUSH, A    
+    JSR HAT_findEnd
+    SET X, A
+    SET A, POP
+    SET [X], B      ; Set strip start sector address
+    
+    
+    ADD [A+1], 1    ; increase parent inode link count.
+    ADD [A+2], 16   ; increase parent content size by 16 bytes (size of link)
+    
+    ADD X, 1
+    SET Y, 0        ; Count of how many characters have been copied
+    :_loop__HAT_createLink
+    IFE Y, 15
+    SET PC, _done__HAT_createLink   ; stop copying if max reached.
+    IFE [C], 0x0000
+    SET PC, _done__HAT_createLink   ; stop copying if end of string reached.
+    SET [X], [C]
+    ADD X, 1
+    ADD C, 1
+    ADD Y, 1
+    SET PC, _loop__HAT_createLink
+    
+    :_done__HAT_createLink
+    SET Y, POP
+    SET X, POP
+    SET PC, POP
+    
+;void HAT_mkdir(A string* name, B inode* directory)
+; Creates a new directory with a givin name in a given directory
+:HAT_mkdir    
+    SET C, A
+    JSR HAT_createDirInode
+    SET PUSH, A
+    SET A, B
+    SET B, POP
+    JSR HAT_createLink
+    SET PC, POP
+    
+
+    
+    
+;A sector* HAT_takeSector(void)
+; Finds the first unused sector, marks it as used and returns a pointer to it.
+:HAT_takeSector
     SET PUSH, X
     SET PUSH, Y
     
     SET X, _.HATsector_map
     SET Y, 0x8000
     
-    :_loop__HAT_findFirstSector
+    :_loop__HAT_takeSector
     SET A, [X]
     AND A, Y
     IFE A, 0x0000
-    SET PC, _found__HAT_findFirstSector
+    SET PC, _found__HAT_takeSector
     IFE Y, 0x0001
-    SET PC, _next__HAT_findFirstSector
+    SET PC, _next__HAT_takeSector
     SHR Y, 0x0001
-    SET PC, _loop__HAT_findFirstSector
+    SET PC, _loop__HAT_takeSector
     
-    :_next__HAT_findFirstSector
+    :_next__HAT_takeSector
     SET Y, 0x8000
     ADD X, 1
     IFE X, _.HATsector_joins            ; We reached the joins table! HAT FS must be full.
-    SET PC, _done__HAT_findFirstSector
-    SET PC, _loop__HAT_findFirstSector
+    SET PC, _done__HAT_takeSector
+    SET PC, _loop__HAT_takeSector
     
-    :_found__HAT_findFirstSector
+    :_found__HAT_takeSector
+    BOR [X], Y                   ; mark this sector as used.
+    
     SUB X, _.HATsector_map    ; calculate sector offset due to which byte a space was found in.
     MUL X, [_sector_size]
     MUL X, 16
     
     SET A, 0                  ; calculate sector offset due to which bit a space was found in.
-    :_loop2__HAT_findFirstSector
+    :_loop2__HAT_takeSector
     SHL Y, 0x0001
     IFE Y, 0x0000
-    SET PC, _dloop2__HAT_findFirstSector
+    SET PC, _dloop2__HAT_takeSector
     ADD A, 1
-    SET PC, _loop2__HAT_findFirstSector
-    :_dloop2__HAT_findFirstSector
+    SET PC, _loop2__HAT_takeSector
+    :_dloop2__HAT_takeSector
     MUL A, [_sector_size]
     
     ADD A, X                  ; combine the two offsets together
     ADD A, _.HATsectors
     
-    :_done__HAT_findFirstSector
+    :_done__HAT_takeSector
     
     SET Y, POP
     SET X, POP
