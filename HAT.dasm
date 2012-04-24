@@ -1,0 +1,163 @@
+
+; Implementation of the HAT File System for use in PaC OS
+; As specified by the community DCPU-16 standards
+; https://github.com/0x10cStandardsCommittee/0x10c-Standards/blob/master/FS/Draft_Harrys_Allocation_Table.txt
+
+; ===============================
+;       TESTS 
+
+JSR HAT_format
+SET A, root_name
+JSR HAT_mkdir
+
+
+:crash SET PC, crash
+
+:root_name DAT "root", 0x0000
+
+; ================================
+
+
+
+
+:_.HATdriver
+:HAT_VERSION DAT 0x4001
+
+;void HAT_format(void)
+; Formats a section of memory to be used as a HAT file system.
+:HAT_format
+
+    ; Set up header information
+    ; will eventually calculate sector sizes and amounts using disk size...
+    SET [_hat_version], [HAT_VERSION]
+    SET [_num_sectors], 192               ; 192 sectors each 128 bytes takes up 0x6000
+    SET [_sector_size], 128
+    SET [_sector_map_start], _.HATsector_map
+    SET [_sector_joins_start], _.HATsector_joins
+    SET [_sectors_start], _.HATsectors
+    SET [_sectors_used], 0
+    
+    
+    SET PC, POP
+    
+
+;A inode* HAT_createInode(A string* name)
+; Creates a new inode in the first available sector and returns 
+; a pointer to the created inode. Note that if name exceeds 15 characters
+; the extra will simply be ignored.
+:HAT_mkdir
+    JSR HAT_findFirstSector
+    SET [A], 1    ;mark inode as a directory.
+    ADD A, 1
+    SET [A], 0  ;new inode has no links pointing to it.
+    ADD A, 1
+    SET [A], 0  ;inode is initialized to empty.
+    SUB A, 2
+    SET PC, POP
+    
+    
+;A sector* HAT_findFirstSector(void)
+; Finds the first unused sector and returns a pointer to it.
+:HAT_findFirstSector
+    SET PUSH, X
+    SET PUSH, Y
+    
+    SET X, _.HATsector_map
+    SET Y, 0x8000
+    
+    :_loop__HAT_findFirstSector
+    SET A, [X]
+    AND A, Y
+    IFE A, 0x0000
+    SET PC, _found__HAT_findFirstSector
+    IFE Y, 0x0001
+    SET PC, _next__HAT_findFirstSector
+    SHR Y, 0x0001
+    SET PC, _loop__HAT_findFirstSector
+    
+    :_next__HAT_findFirstSector
+    SET Y, 0x8000
+    ADD X, 1
+    IFE X, _.HATsector_joins            ; We reached the joins table! HAT FS must be full.
+    SET PC, _done__HAT_findFirstSector
+    SET PC, _loop__HAT_findFirstSector
+    
+    :_found__HAT_findFirstSector
+    SUB X, _.HATsector_map    ; calculate sector offset due to which byte a space was found in.
+    MUL X, [_sector_size]
+    MUL X, 16
+    
+    SET A, 0                  ; calculate sector offset due to which bit a space was found in.
+    :_loop2__HAT_findFirstSector
+    SHL Y, 0x0001
+    IFE Y, 0x0000
+    SET PC, _dloop2__HAT_findFirstSector
+    ADD A, 1
+    SET PC, _loop2__HAT_findFirstSector
+    :_dloop2__HAT_findFirstSector
+    MUL A, [_sector_size]
+    
+    ADD A, X                  ; combine the two offsets together
+    ADD A, _.HATsectors
+    
+    :_done__HAT_findFirstSector
+    
+    SET Y, POP
+    SET X, POP
+    SET PC, POP
+    
+
+    
+
+; INODE STRUCTURE:
+; 1 | type -> (0 unused, 1 directory, 2 file)
+; 1 | num_links
+; 2 | content_size
+
+; LINK STRUCTURE
+; 1 | strip_start_sector
+; 15 | filename (alphanumeric, periods, and underscores). Unused must be set to 0.
+
+
+:_.HATheader
+:_hat_version DAT 0x4001
+:_num_sectors DAT 0x0000
+:_sector_map_start DAT 0x0000, 0x0000
+:_sector_joins_start DAT 0x0000, 0x0000
+:_sectors_start DAT 0x0000, 0x0000
+:_sector_size DAT 0x0000
+:_sectors_used DAT 0x0000
+
+:_.HATsector_map ;reserve sector map space (num_sectors / 16 bytes)
+    DAT 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000
+    DAT 0x0000, 0x0000, 0x0000, 0x0000
+    DAT 0x0000, 0x0000, 0x0000, 0x0000
+    
+:_.HATsector_joins  ;reseerve sector joins table space (num_sectors bytes)
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    DAT 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000 
+    
+:_.HATsectors ;sectors area (needs num_sectors * sector_size bytes)
