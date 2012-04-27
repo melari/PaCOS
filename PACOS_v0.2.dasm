@@ -91,12 +91,12 @@ SET PC, boot
     
     
     
-    
+; ==== BIOS ==========================
+; Scans for hardware that is plugged in and installs drivers.
 
-:s_KERNEL
+:s_BIOS
 
 :boot
-    
     
     HWN I                        ; Search for a monitor device first
     :_monloop__boot
@@ -140,15 +140,19 @@ SET PC, boot
     JSR printLine
  
  
-:core    
+; ==== CORE KERNEL ========================
+; The core kernel handles loading of programs from disk
+; and multitasking context-switching between them.
+ 
+:s_KERNEL
     
     IFE [boot_req_hw], 0xFFFF   ; Check that all manditory hardware was installed.
-    SET PC, _start__core
+    SET PC, _done_reqhw
     SET A, mes_lack_hw
     JSR print
     SET PC, crash
     
-    :_start__core
+    :_done_reqhw
     
     SET A, mes_logo             ; Display PaCOS logo
     JSR printLine
@@ -158,13 +162,22 @@ SET PC, boot
     
 :crash SET PC, crash
 
+; void switchContext(void)
+; Should be called by the installed clock driver to notify the kernel
+; that it is time for a context switch.
+:switchContext
+    SET [CONTEXT_COUNT], 0
+    SET PC, POP
+
+
+
 
 ; === ISR HANDLER ===================
 ; All interrupts will be received by the ISR below. The ISR simply runs the function
 ; pointed to by the interrupt message.
 :s_KERNEL_ISR
     IAQ 1            
-    JSR A    
+    JSR A        
     RFI 0
 
 
@@ -178,16 +191,23 @@ SET PC, boot
                             
     :mes_boot_complete DAT "Starting Kernal...", 0x000A, 0x0000
     :mes_lack_hw       DAT "Failed to launch PaCOS, missing required hardware.", 0x0000
-    ;:mes_logo          DAT "  / _ \\__ _  / __\\ /___\\/ _\\", 0x000A
+    ;:mes_logo          DAT "   ___        ___   ___  __", 0x000A
+    ;                   DAT "  / _ \\__ _  / __\\ /___\\/ _\\", 0x000A
     ;                   DAT " / /_)/ _` |/ /   //  //\\ \\",  0x000A                ; Escaped logo
     ;                   DAT "/ ___/ (_| / /___/ \\_// _\\ \\", 0x000A
-    ;                   DAT "\\/    \\__,_\\____/\\___/  \\__/", 0x0000             
-    :mes_logo          DAT "  / _ \__ _  / __\ /___\/ _\", 0x000A
+    ;                   DAT "\\/    \\__,_\\____/\\___/  \\__/", 0x0000 
+                       
+    :mes_logo          DAT "   ___        ___   ___  __", 0x000A
+                       DAT "  / _ \__ _  / __\ /___\/ _\", 0x000A
                        DAT " / /_)/ _` |/ /   //  //\ \",  0x000A                   ; Standard logo
                        DAT "/ ___/ (_| / /___/ \_// _\ \", 0x000A
                        DAT "\/    \__,_\____/\___/  \__/", 0x0000    
                        
     :VAR_PRINT_COL DAT 0xF000
+    :CLOCK_SPEED   DAT 6  ; Freq = (60/CLOCK_SPEED)Hz
+    :CLOCK         DAT 0
+    :CONTEXT_COUNT DAT 0
+    :CONTEXT_LIMIT DAT 12   ; Context will switch at a rate of (Freq/CONTEXT_LIMIT)Hz
     
 
     
@@ -226,7 +246,7 @@ SET PC, boot
                            DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
                            DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
                            DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0                           
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     :d_7349f615_1802_videoLastRow
                            DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0   ; last row (32 bytes total)
                            DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -300,9 +320,11 @@ SET PC, boot
     SET PUSH, Z
     SET Z, [CURSOR_LOC]
 
+    SUB Z, d_7349f615_1802_video
     DIV Z, 32
     ADD Z, 1
     MUL Z, 32
+    ADD Z, d_7349f615_1802_video
     IFG Z, d_7349f615_1802_videoLast
     SET PC, _offscreen__d_7349f615_1802_newLine
     SET PC, _done__d_7349f615_1802_newLine
@@ -321,7 +343,7 @@ SET PC, boot
 	SET PUSH, X
     SET PUSH, Y
     
-    SET X, 0x8000
+    SET X, d_7349f615_1802_video
     :_loop__d_7349f615_1802_shiftView			; Move all rows upwards (except last)
     SET Y, X
     ADD Y, 0x0020
@@ -445,16 +467,33 @@ SET PC, boot
 ; ---- Generic Clock Driver --------------------
 :d_12D0B402_1
     :mes_install__12D0B402_1 DAT "Generic Clock    | 1", 0x0000
+    :d_12D0B402_1_IO_ADD DAT 0x0000
     
 :d_12D0B402_1_install
     SET PUSH, A
     
-    BOR [boot_req_hw], 0x0004
+    BOR [boot_req_hw], 0x0004               ;Mark req_hw as having installed a clock.
+    SET [d_12D0B402_1_IO_ADD], I            ; Save the IO address for this device.
+    
+    SET A, 0
+    SET B, [CLOCK_SPEED]                    ; Set up clock speed
+    HWI I
+    
+    SET A, 2
+    SET B, d_12D0B402_1_ISR                 ; Set up interrupts
+    HWI I
     
     SET A, mes_install__12D0B402_1
     JSR printLine
     
     SET A, POP
+    SET PC, POP
+    
+:d_12D0B402_1_ISR
+    ADD [CLOCK], 1
+    ADD [CONTEXT_COUNT], 1
+    IFE [CONTEXT_COUNT], [CONTEXT_LIMIT]
+    JSR switchContext
     SET PC, POP
     
     
@@ -465,3 +504,4 @@ SET PC, boot
 ; for a program to be run, it must abide by
 ; the specifications found at the top of this file
 :s_ALLOCATION
+
