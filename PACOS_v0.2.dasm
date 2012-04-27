@@ -1,0 +1,467 @@
+; Panacea Creations Operating System (PaCOS) v0.2
+; Conforms to DCPU specs version 1.7
+; Copyright © 2012 Panacea creations; All Rights Reserved.
+
+; Contains drivers for the following hardware:
+; LEM1802 - Low Energy Monitor (ID 0x7349f615) version 0x1802
+; Generic Keyboard             (ID 0x30cf7406) version 0x0001
+; Generic Clock                (ID 0x12d0b402) Version 0x0001
+
+; ==== PROGRAM DEVELOPEMENT FOR PaCOS =======================
+; PaCOS allows for two methods of running programs, both of 
+; which allow for relocatable code. 
+; 1) Using a relocation table. If the first byte of the loaded
+;    program is the magic number 0x5254, PaCOS will look for a 
+;    relocation table as defined using standards available here:
+;    https://github.com/0x10cStandardsCommittee/0x10c-Standards/blob/master/ASM/Draft_Assembly_Relocation_Table.txt
+; 2) If the program does not start with the magic number, PaCOS
+;    will assume the program has been created using relative jumps
+;    and thus the code needs no relocation processing.
+;
+; System calls can be done using the API table. Usage is
+; straight foreward and is explained  below.
+;
+; Security Notice: Because the DCPU-16 has no memory management,
+; all programs are responsible for not modifying memory outside
+; of their scope. Because of this, users should be careful of
+; what programs are run, as PaCOS can offer no protection from
+; malicious code.
+
+SET PC, boot
+
+
+; ==== API table ===================
+; Below are functions that are available to be used in any program.
+; Many require an external device and driver to operate. If they are
+; called before an appropriate driver is installed, the NO_DRIVER
+; handler will be run instead.
+; The table starts at memory position 0x0002, and each entry is exactly 
+; two bytes long with the driver address going into the second byte.
+; So for example, if an external program wished to call the print command,
+; the instruction SET PC, 8 should be used (2 + 2*[instuction ID])
+:s_API_TABLE    
+    
+
+;                                                                  Instruction ID
+;void printChar(A char character)                                       [0]
+; Print a single character to the console.
+:printChar
+    SET PC, NO_DRIVER
+      
+;void newLine(void)                                                     [1]
+; Move to next line
+:newLine
+    SET PC, NO_DRIVER
+    
+;void shiftView(void)                                                   [2]
+; Moves all characters up one line
+:shiftView
+    SET PC, NO_DRIVER
+    
+;void print(A string* message)                                          [3]
+; Prints a string to the console
+:print
+    SET PC, NO_DRIVER
+
+;void printLine(A string* message)                                      [4]
+; Prints a string to the console followed by a newline.
+:printLine
+    SET PC, d_printLine
+
+;void clr(void)                                                         [5]
+; clears all terminal values.
+:clr
+    SET PC, NO_DRIVER
+    
+;A buffer* getBufferAddress(void)
+; Returns the address of the cyclic keyboard input buffer               [6]
+:getBufferAddress
+    SET PC, NO_DRIVER
+
+
+; ==== API SUPPORT =====================
+; includes API functions that are independant of specific drivers.
+    
+:s_API_SUPPORT
+
+:d_printLine
+    JSR print
+    JSR newLine
+    SET PC, POP
+    
+    
+    
+    
+
+:s_KERNEL
+
+:boot
+    
+    
+    HWN I                        ; Search for a monitor device first
+    :_monloop__boot
+    SUB I, 1
+    IFE I, 0xFFFF
+    SET PC, _hwstart__boot
+    HWQ I
+    
+    ; LEM1802 Monitor
+    IFE A, 0xF615
+    IFE B, 0x7349
+    JSR d_7349f615_1802_install
+    
+    SET PC, _monloop__boot
+    
+    
+    :_hwstart__boot
+    HWN I                       ; Handle remaining IO devices
+    :_hwloop__boot
+    SUB I, 1
+    IFE I, 0xFFFF
+    SET PC, _hwdone__boot
+    HWQ I
+    
+    
+    
+    ; Generic Keyboard
+    IFE A, 0x7406
+    IFE B, 0x30CF
+    JSR d_30cf7406_1_install
+    
+    ; Generic Clock
+    IFE A, 0xB402
+    IFE B, 0x12D0
+    JSR d_12D0B402_1_install
+        
+    SET PC, _hwloop__boot
+    
+    :_hwdone__boot
+    SET A, mes_boot_complete
+    JSR printLine
+ 
+ 
+:core    
+    
+    IFE [boot_req_hw], 0xFFFF   ; Check that all manditory hardware was installed.
+    SET PC, _start__core
+    SET A, mes_lack_hw
+    JSR print
+    SET PC, crash
+    
+    :_start__core
+    
+    SET A, mes_logo             ; Display PaCOS logo
+    JSR printLine
+    
+    IAS s_KERNEL_ISR            ; Enable interrupts    
+    IAQ 0     
+    
+:crash SET PC, crash
+
+
+; === ISR HANDLER ===================
+; All interrupts will be received by the ISR below. The ISR simply runs the function
+; pointed to by the interrupt message.
+:s_KERNEL_ISR
+    IAQ 1            
+    JSR A    
+    RFI 0
+
+
+; ==== VARIABLES ===================
+; Reserve (and initialize in some cases) global variables
+; used by the kernel.
+
+:s_VARIABLES
+    :boot_req_hw DAT 0xFFF8 ;required hardware for boot bitmap
+                            ; 1 = monitor, 2 = keyboard, 4 = clock
+                            
+    :mes_boot_complete DAT "Starting Kernal...", 0x000A, 0x0000
+    :mes_lack_hw       DAT "Failed to launch PaCOS, missing required hardware.", 0x0000
+    ;:mes_logo          DAT "  / _ \\__ _  / __\\ /___\\/ _\\", 0x000A
+    ;                   DAT " / /_)/ _` |/ /   //  //\\ \\",  0x000A                ; Escaped logo
+    ;                   DAT "/ ___/ (_| / /___/ \\_// _\\ \\", 0x000A
+    ;                   DAT "\\/    \\__,_\\____/\\___/  \\__/", 0x0000             
+    :mes_logo          DAT "  / _ \__ _  / __\ /___\/ _\", 0x000A
+                       DAT " / /_)/ _` |/ /   //  //\ \",  0x000A                   ; Standard logo
+                       DAT "/ ___/ (_| / /___/ \_// _\ \", 0x000A
+                       DAT "\/    \__,_\____/\___/  \__/", 0x0000    
+                       
+    :VAR_PRINT_COL DAT 0xF000
+    
+
+    
+; ==== DRIVERS =====================
+; Drivers should be labelled as d_[ID]_[Version].
+; Driver global variables should be stored at the beginning of the driver.
+; An _install function should exist to be run when the IO device is detected.
+; This function should prepare the device for use and replace the needed addresses
+; from the kernel's API table.
+:s_DRIVERS
+
+:NO_DRIVER
+    SET PC, POP
+
+    
+; ---- LEM1802 DRIVER --------------
+:d_7349f615_1802
+    :CURSOR_LOC DAT 0
+    :mes_monitor_startup DAT "Detecting Hardware...", 0x000A, 0x000A
+                         DAT "Device Name      | Driver ver #", 0x000A
+                         DAT "LEM1802          | 1802 ", 0x0000
+    :d_7349f615_1802_video DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0   ; Reserve Video RAM (386 bytes total)
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0                           
+    :d_7349f615_1802_videoLastRow
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0   ; last row (32 bytes total)
+                           DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    :d_7349f615_1802_videoLast
+                           DAT 0                                                            ; Last character (1 byte)
+    :d_7349f615_1802_videoEnd
+    
+:d_7349f615_1802_install    
+    SET PUSH, A
+    SET PUSH, B
+    
+    BOR [boot_req_hw], 0x0001               ; Mark req_hw as having a monitor
+    
+    SET A, 0
+    SET B, d_7349f615_1802_video            ; Map the video RAM
+    HWI I
+    
+    SET [CURSOR_LOC], d_7349f615_1802_video ; Set the cursor to the first position.
+    
+    SET A, printChar
+    SET [A+1], d_7349f615_1802_printChar
+    
+    SET A, newLine
+    SET [A+1], d_7349f615_1802_newLine
+    
+    SET A, shiftView
+    SET [A+1], d_7349f615_1802_shiftView
+    
+    SET A, print
+    SET [A+1], d_7349f615_1802_print    
+    
+    SET A, clr
+    SET [A+1], d_7349f615_1802_clr
+    
+    
+    SET A, mes_monitor_startup
+    JSR printLine
+    
+    SET B, POP
+    SET A, POP
+    SET PC, POP
+    
+:d_7349f615_1802_printChar
+    SET PUSH, A
+    SET PUSH, Z    
+    
+	IFE A, 0x000A
+    SET PC, _newline__7349f615_1802_printChar
+    
+    AND A, 0x00FF
+    BOR A, [VAR_PRINT_COL]
+    SET Z, [CURSOR_LOC]
+    SET [Z], A
+    ADD Z, 1
+    SET [CURSOR_LOC], Z
+    
+    IFG Z, d_7349f615_1802_videoLast ;Passed end of console output
+    JSR newLine
+    SET PC, _done__7349f615_1802_printChar
+    
+    :_newline__7349f615_1802_printChar
+    JSR newLine    
+    
+    :_done__7349f615_1802_printChar    
+    SET Z, POP
+    SET A, POP    
+    SET PC, POP
+    
+    
+:d_7349f615_1802_newLine
+    SET PUSH, Z
+    SET Z, [CURSOR_LOC]
+
+    DIV Z, 32
+    ADD Z, 1
+    MUL Z, 32
+    IFG Z, d_7349f615_1802_videoLast
+    SET PC, _offscreen__d_7349f615_1802_newLine
+    SET PC, _done__d_7349f615_1802_newLine
+    
+    :_offscreen__d_7349f615_1802_newLine
+    SET Z, d_7349f615_1802_videoLastRow
+    JSR shiftView
+    
+    :_done__d_7349f615_1802_newLine
+    SET [CURSOR_LOC], Z
+    SET Z, POP
+    SET PC, POP
+    
+    
+:d_7349f615_1802_shiftView
+	SET PUSH, X
+    SET PUSH, Y
+    
+    SET X, 0x8000
+    :_loop__d_7349f615_1802_shiftView			; Move all rows upwards (except last)
+    SET Y, X
+    ADD Y, 0x0020
+    SET [X], [Y]
+    ADD X, 1
+    IFE X, d_7349f615_1802_videoLastRow
+    SET PC, _next__d_7349f615_1802_shiftView
+    SET PC, _loop__d_7349f615_1802_shiftView
+    
+    :_next__d_7349f615_1802_shiftView			; Clear bottom row
+    SET [X], 0x0020
+    ADD X, 1
+    IFG X, d_7349f615_1802_videoLast
+    SET PC, _end__d_7349f615_1802_shiftView
+    SET PC, _next__d_7349f615_1802_shiftView
+    
+ 	:_end__d_7349f615_1802_shiftView
+    SET Y, POP
+    SET X, POP
+	SET PC, POP
+    
+
+:d_7349f615_1802_print
+    SET PUSH, A
+	SET PUSH, X
+    SET PUSH, I
+    SET I, A
+    
+    ;check for color bit
+    SET X, [VAR_PRINT_COL]
+    IFN [I], 0xFFFF
+    SET PC, _loop__d_7349f615_1802_print
+    ADD I, 1
+    SET [VAR_PRINT_COL], [I]
+    ADD I, 1
+    
+    :_loop__d_7349f615_1802_print
+    SET A, [I]
+    IFE A, 0x0000
+    SET PC, _done__d_7349f615_1802_print
+    JSR printChar
+    ADD I, 1
+    SET PC, _loop__d_7349f615_1802_print
+
+    :_done__d_7349f615_1802_print
+    SET [VAR_PRINT_COL], X
+    SET I, POP
+    SET X, POP    
+    SET A, POP
+    SET PC, POP
+    
+:d_7349f615_1802_clr
+    SET PUSH, Z
+    SET Z, [CURSOR_LOC]
+    
+    SET Z, d_7349f615_1802_video
+    :_loop__d_7349f615_1802_clr
+    SET [Z], 0x0000
+    ADD Z, 1
+    IFN Z, d_7349f615_1802_videoEnd
+    SET PC, _loop__d_7349f615_1802_clr
+    SET Z, d_7349f615_1802_video
+    
+    SET [CURSOR_LOC], Z
+    SET Z, POP
+    SET PC, POP
+    
+    
+; ---- Generic Keyboard Driver ------------------
+:d_30cf7406_1
+    :mes_install__30cf7406_1 DAT "Generic Keyboard | 1", 0x0000
+    :d_30cf7406_1_IO_ADD DAT 0x0000
+    :d_30cf7406_1_buf DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    :d_30cf7406_1_bufPoint DAT 0
+    
+:d_30cf7406_1_install
+    SET PUSH, A
+
+    SET [d_30cf7406_1_bufPoint], d_30cf7406_1_buf
+    
+    BOR [boot_req_hw], 0x0002           ; Mark req_hw having installed a keyboard
+    SET [d_30cf7406_1_IO_ADD], I        ; Save the IO address for this device.
+    
+    SET A, getBufferAddress
+    SET [A+1], d_30cf7406_1_getBufferAddress
+    
+    SET B, d_30cf7406_1_ISR             ; Activate interrupts
+    SET A, 3
+    HWI I
+    
+    SET A, mes_install__30cf7406_1
+    JSR printLine
+    
+    SET A, POP
+    SET PC, POP
+    
+:d_30cf7406_1_ISR
+    SET PUSH, C
+    
+    SET A, 1
+    HWI [d_30cf7406_1_IO_ADD]
+    IFE C, 0    ; buffer is empty (ie intr caused by key pressed/released events)
+    SET PC, _skip__d_30cf7406_1_ISR
+    
+    SET A, [d_30cf7406_1_bufPoint]
+    SET [A], C
+    ADD A, 1
+    IFE A, d_30cf7406_1_bufPoint
+    SET A, d_30cf7406_1_buf
+    SET [d_30cf7406_1_bufPoint], A
+    
+    :_skip__d_30cf7406_1_ISR
+    SET C, POP
+    SET PC, POP
+    
+:d_30cf7406_1_getBufferAddress
+    SET A, d_30cf7406_1_buf
+    SET PC, POP
+    
+    
+; ---- Generic Clock Driver --------------------
+:d_12D0B402_1
+    :mes_install__12D0B402_1 DAT "Generic Clock    | 1", 0x0000
+    
+:d_12D0B402_1_install
+    SET PUSH, A
+    
+    BOR [boot_req_hw], 0x0004
+    
+    SET A, mes_install__12D0B402_1
+    JSR printLine
+    
+    SET A, POP
+    SET PC, POP
+    
+    
+    
+; ==== ALLOCATION ==============================
+; The remainder of memory space is used to load 
+; and run programs from the hard disks. In order
+; for a program to be run, it must abide by
+; the specifications found at the top of this file
+:s_ALLOCATION
