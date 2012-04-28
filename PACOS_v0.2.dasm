@@ -151,8 +151,22 @@ SET PC, boot
     SET A, mes_lack_hw
     JSR print
     SET PC, crash
-    
     :_done_reqhw
+    
+    SET A, s_ALLOCATION        ; Reserve OS space
+    JSR reserveSectors
+    
+    SET A, test_program_end
+    SUB A, test_program
+    JSR reserveSectors         ; Load the test_program program.
+    SET I, test_program
+    SET J, A
+    SET A, test_program_end
+    SUB A, 1
+    JSR loadProgram
+    SET A, J
+    JSR newProcess
+    
     
     SET A, mes_logo             ; Display PaCOS logo
     JSR printLine
@@ -165,12 +179,139 @@ SET PC, boot
 ; void switchContext(void)
 ; Should be called by the installed clock driver to notify the kernel
 ; that it is time for a context switch.
-:switchContext
+:switchContext    
     SET [CONTEXT_COUNT], 0
+    
+    IFE [CONTEXT_ID], 0 ;check if first process is starting up...
+    SET PC, _first__switchContext
+        
+    ;Find next context...
+    SET A, [CONTEXT_ID]
+    :_loop__switchContext
+    ADD A, 14
+    IFE A, process_table_end
+    SET A, s_PROCESS_TABLE
+    IFC [A], 0x0001
+    SET PC, _loop__switchContext
+    
+    IFE A, [CONTEXT_ID] ;next context == current context.. just stop here.
+    SET PC, POP
+    
+    SET [_nextContext__switchContext], A
+    SET A, [CONTEXT_ID]
+    ADD SP, 2   ; remove return addresses for switchContext and the clock driver ISR
+    SET [A+3], POP  ; Saved A value from before interrupt
+    SET [A+4], B
+    SET [A+5], C
+    SET [A+6], X
+    SET [A+7], Y
+    SET [A+8], Z
+    SET [A+9], I
+    SET [A+10], J
+    SET [A+11], SP
+    ADD [A+11], 1    ; Account for the excess PC still sitting on the stack.
+    SET [A+12], EX
+    SET [A+13], POP ; Saved PC value from before interrupt.    
+    SET A, [_nextContext__switchContext]
+    
+    
+    :_load__switchContext ; A should be pointing to new context by this point...
+    SET [CONTEXT_ID], A
+    SET B, [A+4]
+    SET C, [A+5]
+    SET X, [A+6]
+    SET Y, [A+7]
+    SET Z, [A+8]
+    SET I, [A+9]
+    SET J, [A+10]
+    SET SP, [A+11]
+    SET EX, [A+12]
+    SET PUSH, [A+13]    ; push wanted SP to stack
+    SET PUSH, [A+3]     ; push wanted A  to stack
+    RFI 0               ; enables interrupts and sets SP and A.
+    
+    
+    :_first__switchContext
+    IFC [s_PROCESS_TABLE], 0x0001   ;no processes running...
+    SET PC, POP
+    SET A, s_PROCESS_TABLE
+    ADD SP, 4   ; remove RET1, RET2, A, and SP from stack
+    SET PC, _load__switchContext
+    
+    :_nextContext__switchContext DAT 0
+    
+    
+; void newProcess(A sector* sectorStart, B sector* sectorEnd)
+:newProcess
+    SET PUSH, I
+    
+    SET I, s_PROCESS_TABLE
+    :_loop__newProcess
+    IFC [I], 0x0001
+    SET PC, _found__newProcess
+    ADD I, 1
+    IFE I, process_table_end
+    SET PC, _noroom__newProcess
+    SET PC, _loop__newProcess
+    
+    :_found__newProcess
+    BOR [I], 0x0001     ; status
+    SET [I+1], A        ; sector_start
+    SET [I+2], B        ; sector_end
+    SET [I+11], 0       ; SP
+    SET [I+13], A       ; PC   
+    SET PC, _done__newProcess
+    
+    :_noroom__newProcess
+    ; not sure what will go here.... silently fails for now.
+    
+    :_done__newProcess
+    SET I, POP
+    SET PC, POP
+    
+;void loadProgram(I addr src, J addr dest, A addr src_end)
+; Copies a program from the src to dest.
+; Eventually will apply relocation tables, ect.
+:loadProgram
+    SET PUSH, I
+    SET PUSH, J
+    
+    :_loop__loadProgram
+    STI [J], [I]
+    IFG I, A
+    SET PC, _done__loadProgram
+    SET PC, _loop__loadProgram
+    
+    :_done__loadProgram
+    SET J, POP
+    SET I, POP
     SET PC, POP
 
 
-
+; ==== PROCESS TABLE =====================
+; Stores information on currently running
+; processess and where they can be found in memory.
+; Each entry takes the following format:
+; [1] status byte
+;     --> abcd efgh ijkl mnop
+;         p: used (unused/used)
+; [1] sector start: First sector reserved by program
+; [1] sector end: Last sector reserved by proram
+; [11] context: saved copies of registers in order: ABCXYZIJ SP EX PC
+;
+; There is (currently) support for up to 8 concurrent processes.
+; This could easily be increased to around 30 in the future. 
+:s_PROCESS_TABLE
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+:process_table_end
+    
 
 ; === ISR HANDLER ===================
 ; All interrupts will be received by the ISR below. The ISR simply runs the function
@@ -181,6 +322,96 @@ SET PC, boot
     RFI 0
 
 
+; ==== ALLOCATION_TABLE =============
+; Stores which program allocation sectors are currently in use.
+; The RAM is devided into 32 sectors each of 0x0800 bytes in size.
+; Each sector has a status bit in the allocation table with the following format:
+; abcd efgh ijkl mnop
+; p : reserved bit (unused / taken)
+:s_ALLOCATION_TABLE
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+:allocation_table_end
+    
+; (A sector* start, B sector* end) reserveSectors(A byte dataLength)
+; Reserves a given amount of space in RAM. If there is not enough space,
+; both A and/or B will be set to 0xFFFF.
+:reserveSectors
+    SET PUSH, I
+    SET PUSH, J
+    
+    SET B, A
+    DIV B, 0x0800
+    MOD A, 0x0800   ; Calculate number of sectors needed
+    IFN A, 0
+    ADD B, 1
+    SET I, B
+    
+    SET J, I                    ; I-needed sectors, J-sector_count, A-start, B-end
+    SET B, s_ALLOCATION_TABLE
+    SET A, B
+    
+    
+    :_loop__reserveSectors
+    IFE B, allocation_table_end
+    SET PC, _noroom__reserveSectors
+    
+    IFB [B], 0x0001
+    SET PC, _next__reserveSectors
+    
+    SUB J, 1
+    IFE J, 0
+    SET PC, _doReserve__reserveSectors
+    
+    ADD B, 1    
+    SET PC, _loop__reserveSectors
+    
+    
+    :_next__reserveSectors
+    ADD B, 1    
+    SET A, B
+    SET J, I
+    SET PC, _loop__reserveSectors
+    
+    
+    :_doReserve__reserveSectors  ; A-start, B-end
+    SET I, A
+    :_reserveLoop__reserveSectors
+    BOR [I], 0x0001
+    ADD I, 1
+    IFG I, B
+    SET PC, _convert__reserveSectors
+    SET PC, _reserveLoop__reserveSectors
+    
+    :_convert__reserveSectors
+    SUB A, s_ALLOCATION_TABLE
+    SUB B, s_ALLOCATION_TABLE
+    MUL A, 0x0800
+    MUL B, 0x0800    
+    SET PC, _done__reserveSectors
+    
+    :_noroom__reserveSectors
+    SET A, 0xFFFF
+    SET B, 0xFFFF    
+    
+    :_done__reserveSectors
+    SET J, POP
+    SET I, POP
+    SET PC, POP
+    
+; void freeSector(A sector* sector)
+; Frees the given sector so that it can be reused by another program.
+:freeSector
+    SET PUSH, A    
+    
+    DIV A, 0x0800
+    ADD A, s_ALLOCATION_TABLE
+    AND [A], 0xFFFE
+    
+    SET A, POP
+    SET PC, POP
+
+    
 ; ==== VARIABLES ===================
 ; Reserve (and initialize in some cases) global variables
 ; used by the kernel.
@@ -204,10 +435,11 @@ SET PC, boot
                        DAT "\/    \__,_\____/\___/  \__/", 0x0000    
                        
     :VAR_PRINT_COL DAT 0xF000
-    :CLOCK_SPEED   DAT 6  ; Freq = (60/CLOCK_SPEED)Hz
+    :CLOCK_SPEED   DAT 1  ; Freq = (60/CLOCK_SPEED)Hz
     :CLOCK         DAT 0
     :CONTEXT_COUNT DAT 0
-    :CONTEXT_LIMIT DAT 12   ; Context will switch at a rate of (Freq/CONTEXT_LIMIT)Hz
+    :CONTEXT_LIMIT DAT 1   ; Context will switch at a rate of (Freq/CONTEXT_LIMIT)Hz
+    :CONTEXT_ID    DAT 0   ; Currently running context. 0 = none.
     
 
     
@@ -505,3 +737,14 @@ SET PC, boot
 ; the specifications found at the top of this file
 :s_ALLOCATION
 
+
+:test_program
+        
+    SET A, 0x41
+    ADD A, 1
+    IFE A, 0x51
+    SET A, 0x41
+    JSR printChar
+    SUB PC, 8
+    
+:test_program_end
