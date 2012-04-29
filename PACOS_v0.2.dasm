@@ -1,5 +1,5 @@
 ; Panacea Creations Operating System (PaCOS) v0.2
-; Conforms to DCPU specs version 1.7
+; Conforms to DCPU specs version 1.6 (Easily upgraded to 1.7, but held back for emulator support.)
 ; Copyright © 2012 Panacea creations; All Rights Reserved.
 
 ; Contains drivers for the following hardware:
@@ -228,7 +228,10 @@ SET PC, boot
     SET EX, [A+12]
     SET PUSH, [A+13]    ; push wanted SP to stack
     SET PUSH, [A+3]     ; push wanted A  to stack
-    RFI 0               ; enables interrupts and sets SP and A.
+    ;RFI 0               ; enables interrupts and sets SP and A.
+    IAQ 0
+    SET A, POP
+    SET PC, POP
     
     
     :_first__switchContext
@@ -319,7 +322,10 @@ SET PC, boot
 :s_KERNEL_ISR
     IAQ 1            
     JSR A        
-    RFI 0
+    ;RFI 0
+    IAQ 0
+    SET A, POP
+    SET PC, POP
 
 
 ; ==== ALLOCATION_TABLE =============
@@ -422,17 +428,17 @@ SET PC, boot
                             
     :mes_boot_complete DAT "Starting Kernal...", 0x000A, 0x0000
     :mes_lack_hw       DAT "Failed to launch PaCOS, missing required hardware.", 0x0000
-    ;:mes_logo          DAT "   ___        ___   ___  __", 0x000A
-    ;                   DAT "  / _ \\__ _  / __\\ /___\\/ _\\", 0x000A
-    ;                   DAT " / /_)/ _` |/ /   //  //\\ \\",  0x000A                ; Escaped logo
-    ;                   DAT "/ ___/ (_| / /___/ \\_// _\\ \\", 0x000A
-    ;                   DAT "\\/    \\__,_\\____/\\___/  \\__/", 0x0000 
-                       
     :mes_logo          DAT "   ___        ___   ___  __", 0x000A
-                       DAT "  / _ \__ _  / __\ /___\/ _\", 0x000A
-                       DAT " / /_)/ _` |/ /   //  //\ \",  0x000A                   ; Standard logo
-                       DAT "/ ___/ (_| / /___/ \_// _\ \", 0x000A
-                       DAT "\/    \__,_\____/\___/  \__/", 0x0000    
+                       DAT "  / _ \\__ _  / __\\ /___\\/ _\\", 0x000A
+                       DAT " / /_)/ _` |/ /   //  //\\ \\",  0x000A                ; Escaped logo
+                       DAT "/ ___/ (_| / /___/ \\_// _\\ \\", 0x000A
+                       DAT "\\/    \\__,_\\____/\\___/  \\__/", 0x0000 
+                       
+    ;:mes_logo          DAT "   ___        ___   ___  __", 0x000A
+    ;                   DAT "  / _ \__ _  / __\ /___\/ _\", 0x000A
+    ;                   DAT " / /_)/ _` |/ /   //  //\ \",  0x000A                   ; Standard logo
+    ;                   DAT "/ ___/ (_| / /___/ \_// _\ \", 0x000A
+    ;                   DAT "\/    \__,_\____/\___/  \__/", 0x0000    
                        
     :VAR_PRINT_COL DAT 0xF000
     :CLOCK_SPEED   DAT 1  ; Freq = (60/CLOCK_SPEED)Hz
