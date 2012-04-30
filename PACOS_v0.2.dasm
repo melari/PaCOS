@@ -8,9 +8,20 @@
 ; Generic Clock                (ID 0x12d0b402) Version 0x0001
 
 ; ==== PROGRAM DEVELOPEMENT FOR PaCOS =======================
+; PaCOS allows for several special parameters to be stored in the header
+; of a program. Headers are optional. To specify that a header is included,
+; the first byte of the program should be 0xFFFF. The table format is as follows:
+
+; Data Size         Description
+;     1          Amount of additional memory required (after program code)
+;                This can be used for getting a larger stack frame ect. By 
+;                default, PaCOS will give a program at least 0x0032 bytes
+;                for the stack frame. If more is required, it must be specified.
+
 ; PaCOS allows for two methods of running programs, both of 
-; which allow for relocatable code. 
-; 1) Using a relocation table. If the first byte of the loaded
+; which allow for relocatable code.
+; 1) Using a relocation table. If the first byte (or first byte
+;    after the header) of the loaded
 ;    program is the magic number 0x5254, PaCOS will look for a 
 ;    relocation table as defined using standards available here:
 ;    https://github.com/0x10cStandardsCommittee/0x10c-Standards/blob/master/ASM/Draft_Assembly_Relocation_Table.txt
@@ -168,6 +179,7 @@ SET PC, boot
     
     SET A, test_program_end
     SUB A, test_program
+    ADD A, 0x0032   ; extra for stack frame.
     JSR reserveSectors         ; Load the test_program program.
     SET I, test_program
     SET J, A
@@ -179,6 +191,7 @@ SET PC, boot
     
     SET A, second_program_end
     SUB A, second_program
+    ADD A, 0x0032   ; extra for stack frame.
     JSR reserveSectors         ; Load the test_program program.
     SET I, second_program
     SET J, A
@@ -265,16 +278,12 @@ SET PC, boot
 ; void newProcess(A sector* sectorStart, B sector* sectorEnd)
 :newProcess
     SET PUSH, I
-    SET PUSH, X     
-    
-    SET X, 0    ;stack frame for the process
     
     SET I, s_PROCESS_TABLE
     :_loop__newProcess
     IFC [I], 0x0001
     SET PC, _found__newProcess
-    ADD I, 14
-    SUB X, 50
+    ADD I, 14    
     
     IFE I, process_table_end
     SET PC, _noroom__newProcess
@@ -283,16 +292,21 @@ SET PC, boot
     :_found__newProcess
     BOR [I], 0x0001     ; status
     SET [I+1], A        ; sector_start
-    SET [I+2], B        ; sector_end
-    SET [I+11], X       ; SP
-    SET [I+13], A       ; PC   
+    SET [I+2], B        ; sector_end    
+    SET [I+13], A       ; PC
+    
+    SET PUSH, B
+    ADD B, [SECTOR_SIZE]    ;SP starts at sectorEnd + SECTOR_SIZE - 1
+    SUB B, 1
+    SET [I+11], B       ; SP    
+    SET B, POP
+    
     SET PC, _done__newProcess
     
     :_noroom__newProcess
     ; not sure what will go here.... silently fails for now.
     
-    :_done__newProcess
-    SET X, POP
+    :_done__newProcess    
     SET I, POP
     SET PC, POP
     
@@ -351,11 +365,13 @@ SET PC, boot
 
 ; ==== ALLOCATION_TABLE =============
 ; Stores which program allocation sectors are currently in use.
-; The RAM is devided into 32 sectors each of 0x0800 bytes in size.
+; The RAM is devided into 64 sectors each of 0x0400 bytes in size.
 ; Each sector has a status bit in the allocation table with the following format:
 ; abcd efgh ijkl mnop
 ; p : reserved bit (unused / taken)
 :s_ALLOCATION_TABLE
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 :allocation_table_end
@@ -368,8 +384,8 @@ SET PC, boot
     SET PUSH, J
     
     SET B, A
-    DIV B, 0x0800
-    MOD A, 0x0800   ; Calculate number of sectors needed
+    DIV B, [SECTOR_SIZE]
+    MOD A, [SECTOR_SIZE]   ; Calculate number of sectors needed
     IFN A, 0
     ADD B, 1
     SET I, B
@@ -413,8 +429,8 @@ SET PC, boot
     :_convert__reserveSectors
     SUB A, s_ALLOCATION_TABLE
     SUB B, s_ALLOCATION_TABLE
-    MUL A, 0x0800
-    MUL B, 0x0800    
+    MUL A, [SECTOR_SIZE]
+    MUL B, [SECTOR_SIZE]    
     SET PC, _done__reserveSectors
     
     :_noroom__reserveSectors
@@ -431,7 +447,7 @@ SET PC, boot
 :freeSector
     SET PUSH, A    
     
-    DIV A, 0x0800
+    DIV A, [SECTOR_SIZE]
     ADD A, s_ALLOCATION_TABLE
     AND [A], 0xFFFE
     
@@ -467,6 +483,7 @@ SET PC, boot
     :CONTEXT_COUNT DAT 0
     :CONTEXT_LIMIT DAT 1   ; Context will switch at a rate of (Freq/CONTEXT_LIMIT)Hz
     :CONTEXT_ID    DAT 0   ; Currently running context. 0 = none.
+    :SECTOR_SIZE   DAT 0x0400   ; Size of each sector to split memory into. Make sure to adjust the allocation accordingly.
     
 
     
@@ -779,7 +796,7 @@ SET PC, boot
 :second_program
 
     JSR getPrintColVar
-    ADD [A], 0x1000
+    ADD [A], 0x1000    
     SUB PC, 3
 
 :second_program_end
