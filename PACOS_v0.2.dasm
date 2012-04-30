@@ -175,37 +175,22 @@ SET PC, boot
     :_done_reqhw
     
     SET A, s_ALLOCATION        ; Reserve OS space
-    JSR reserveSectors
-    
-    SET A, test_program_end
-    SUB A, test_program
-    ADD A, 0x0032   ; extra for stack frame.
-    JSR reserveSectors         ; Load the test_program program.
-    SET I, test_program
-    SET J, A
-    SET A, test_program_end
-    SUB A, 1
-    JSR loadProgram
-    SET A, J
-    JSR newProcess
-    
-    SET A, second_program_end
-    SUB A, second_program
-    ADD A, 0x0032   ; extra for stack frame.
-    JSR reserveSectors         ; Load the test_program program.
-    SET I, second_program
-    SET J, A
-    SET A, second_program_end
-    SUB A, 1
-    JSR loadProgram
-    SET A, J
-    JSR newProcess
-    
+    JSR reserveSectors    
     
     SET A, mes_logo             ; Display PaCOS logo
     JSR printLine
     
-    IAS s_KERNEL_ISR            ; Enable interrupts    
+    SET A, test_program_end
+    SUB A, test_program         ; Start a test process (letter printing)
+    SET B, test_program
+    JSR loadProgram
+    
+    SET A, second_program_end   ; Start a second process (color switching)
+    SUB A, second_program
+    SET B, second_program
+    JSR loadProgram
+    
+    IAS s_KERNEL_ISR            ; Enable interrupts (ie allow processes to start running)
     IAQ 0     
     
 :crash SET PC, crash
@@ -274,6 +259,32 @@ SET PC, boot
     
     :_nextContext__switchContext DAT 0
     
+; void loadProgram(A byte filesize, B file* program)
+:loadProgram   
+    SET PUSH, J
+    SET PUSH, I
+    SET PUSH, X
+    SET PUSH, Y
+
+    SET X, A    ;backup arguments.
+    SET Y, B
+    
+    ADD A, 0x0032               ; extra for stack frame.
+    JSR reserveSectors         ; Load the test_program program.
+    SET I, Y    ; src = progam file
+    SET J, A    ; dest = sectorStart
+    SET A, Y    ; lastByte = file + filesize - 1
+    ADD A, X
+    SUB A, 1
+    JSR relocateProgram
+    SET A, J
+    JSR newProcess
+    
+    SET Y, POP
+    SET X, POP
+    SET I, POP
+    SET J, POP
+    SET PC, POP
     
 ; void newProcess(A sector* sectorStart, B sector* sectorEnd)
 :newProcess
@@ -310,20 +321,20 @@ SET PC, boot
     SET I, POP
     SET PC, POP
     
-;void loadProgram(I addr src, J addr dest, A addr src_end)
+;void relocateProgram(I addr src, J addr dest, A addr src_end)
 ; Copies a program from the src to dest.
 ; Eventually will apply relocation tables, ect.
-:loadProgram
+:relocateProgram
     SET PUSH, I
     SET PUSH, J
     
-    :_loop__loadProgram
+    :_loop__relocateProgram
     STI [J], [I]
     IFG I, A
-    SET PC, _done__loadProgram
-    SET PC, _loop__loadProgram
+    SET PC, _done__relocateProgram
+    SET PC, _loop__relocateProgram
     
-    :_done__loadProgram
+    :_done__relocateProgram
     SET J, POP
     SET I, POP
     SET PC, POP
