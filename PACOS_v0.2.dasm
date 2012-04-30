@@ -77,6 +77,12 @@ SET PC, boot
 ; Returns the address of the cyclic keyboard input buffer               [6]
 :getBufferAddress
     SET PC, NO_DRIVER
+    
+;A getPrintColVar(void)
+; Returns the address to the PRINT_COL global variable to be read/set.  [7]
+:getPrintColVar
+    SET PC, d_getPrintColVar
+    
 
 
 ; ==== API SUPPORT =====================
@@ -87,6 +93,10 @@ SET PC, boot
 :d_printLine
     JSR print
     JSR newLine
+    SET PC, POP
+    
+:d_getPrintColVar
+    SET A, PRINT_COL
     SET PC, POP
     
     
@@ -167,6 +177,17 @@ SET PC, boot
     SET A, J
     JSR newProcess
     
+    SET A, second_program_end
+    SUB A, second_program
+    JSR reserveSectors         ; Load the test_program program.
+    SET I, second_program
+    SET J, A
+    SET A, second_program_end
+    SUB A, 1
+    JSR loadProgram
+    SET A, J
+    JSR newProcess
+    
     
     SET A, mes_logo             ; Display PaCOS logo
     JSR printLine
@@ -228,10 +249,7 @@ SET PC, boot
     SET EX, [A+12]
     SET PUSH, [A+13]    ; push wanted SP to stack
     SET PUSH, [A+3]     ; push wanted A  to stack
-    ;RFI 0               ; enables interrupts and sets SP and A.
-    IAQ 0
-    SET A, POP
-    SET PC, POP
+    RFI                 ; enables interrupts and sets SP and A.    
     
     
     :_first__switchContext
@@ -247,12 +265,17 @@ SET PC, boot
 ; void newProcess(A sector* sectorStart, B sector* sectorEnd)
 :newProcess
     SET PUSH, I
+    SET PUSH, X     
+    
+    SET X, 0    ;stack frame for the process
     
     SET I, s_PROCESS_TABLE
     :_loop__newProcess
     IFC [I], 0x0001
     SET PC, _found__newProcess
-    ADD I, 1
+    ADD I, 14
+    SUB X, 50
+    
     IFE I, process_table_end
     SET PC, _noroom__newProcess
     SET PC, _loop__newProcess
@@ -261,7 +284,7 @@ SET PC, boot
     BOR [I], 0x0001     ; status
     SET [I+1], A        ; sector_start
     SET [I+2], B        ; sector_end
-    SET [I+11], 0       ; SP
+    SET [I+11], X       ; SP
     SET [I+13], A       ; PC   
     SET PC, _done__newProcess
     
@@ -269,6 +292,7 @@ SET PC, boot
     ; not sure what will go here.... silently fails for now.
     
     :_done__newProcess
+    SET X, POP
     SET I, POP
     SET PC, POP
     
@@ -322,10 +346,7 @@ SET PC, boot
 :s_KERNEL_ISR
     IAQ 1            
     JSR A        
-    ;RFI 0
-    IAQ 0
-    SET A, POP
-    SET PC, POP
+    RFI    
 
 
 ; ==== ALLOCATION_TABLE =============
@@ -428,19 +449,19 @@ SET PC, boot
                             
     :mes_boot_complete DAT "Starting Kernal...", 0x000A, 0x0000
     :mes_lack_hw       DAT "Failed to launch PaCOS, missing required hardware.", 0x0000
-    :mes_logo          DAT "   ___        ___   ___  __", 0x000A
-                       DAT "  / _ \\__ _  / __\\ /___\\/ _\\", 0x000A
-                       DAT " / /_)/ _` |/ /   //  //\\ \\",  0x000A                ; Escaped logo
-                       DAT "/ ___/ (_| / /___/ \\_// _\\ \\", 0x000A
-                       DAT "\\/    \\__,_\\____/\\___/  \\__/", 0x0000 
-                       
     ;:mes_logo          DAT "   ___        ___   ___  __", 0x000A
-    ;                   DAT "  / _ \__ _  / __\ /___\/ _\", 0x000A
-    ;                   DAT " / /_)/ _` |/ /   //  //\ \",  0x000A                   ; Standard logo
-    ;                   DAT "/ ___/ (_| / /___/ \_// _\ \", 0x000A
-    ;                   DAT "\/    \__,_\____/\___/  \__/", 0x0000    
+    ;                   DAT "  / _ \\__ _  / __\\ /___\\/ _\\", 0x000A
+    ;                   DAT " / /_)/ _` |/ /   //  //\\ \\",  0x000A                ; Escaped logo
+    ;                   DAT "/ ___/ (_| / /___/ \\_// _\\ \\", 0x000A
+    ;                   DAT "\\/    \\__,_\\____/\\___/  \\__/", 0x0000 
                        
-    :VAR_PRINT_COL DAT 0xF000
+    :mes_logo          DAT "   ___        ___   ___  __", 0x000A
+                       DAT "  / _ \__ _  / __\ /___\/ _\", 0x000A
+                       DAT " / /_)/ _` |/ /   //  //\ \",  0x000A                   ; Standard logo
+                       DAT "/ ___/ (_| / /___/ \_// _\ \", 0x000A
+                       DAT "\/    \__,_\____/\___/  \__/", 0x0000    
+                       
+    :PRINT_COL DAT 0xF000
     :CLOCK_SPEED   DAT 1  ; Freq = (60/CLOCK_SPEED)Hz
     :CLOCK         DAT 0
     :CONTEXT_COUNT DAT 0
@@ -535,7 +556,7 @@ SET PC, boot
     SET PC, _newline__7349f615_1802_printChar
     
     AND A, 0x00FF
-    BOR A, [VAR_PRINT_COL]
+    BOR A, [PRINT_COL]
     SET Z, [CURSOR_LOC]
     SET [Z], A
     ADD Z, 1
@@ -611,11 +632,11 @@ SET PC, boot
     SET I, A
     
     ;check for color bit
-    SET X, [VAR_PRINT_COL]
+    SET X, [PRINT_COL]
     IFN [I], 0xFFFF
     SET PC, _loop__d_7349f615_1802_print
     ADD I, 1
-    SET [VAR_PRINT_COL], [I]
+    SET [PRINT_COL], [I]
     ADD I, 1
     
     :_loop__d_7349f615_1802_print
@@ -627,7 +648,7 @@ SET PC, boot
     SET PC, _loop__d_7349f615_1802_print
 
     :_done__d_7349f615_1802_print
-    SET [VAR_PRINT_COL], X
+    SET [PRINT_COL], X
     SET I, POP
     SET X, POP    
     SET A, POP
@@ -754,3 +775,11 @@ SET PC, boot
     SUB PC, 8
     
 :test_program_end
+
+:second_program
+
+    JSR getPrintColVar
+    ADD [A], 0x1000
+    SUB PC, 3
+
+:second_program_end
