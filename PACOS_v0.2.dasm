@@ -94,6 +94,11 @@ SET PC, boot
 :getPrintColVar
     SET PC, d_getPrintColVar
     
+;void yield(void)
+; Yield to the next process (for optional cooperative multi-tasking)    [8]
+:yield
+    SET PC, d_yield
+    
 
 
 ; ==== API SUPPORT =====================
@@ -109,6 +114,12 @@ SET PC, boot
 :d_getPrintColVar
     SET A, PRINT_COL
     SET PC, POP
+    
+:d_yield
+    IAQ 1
+    SET PUSH, A
+    SUB SP, 2
+    SET PC, switchContext
     
     
     
@@ -198,7 +209,7 @@ SET PC, boot
 ; void switchContext(void)
 ; Should be called by the installed clock driver to notify the kernel
 ; that it is time for a context switch.
-:switchContext    
+:switchContext
     SET [CONTEXT_COUNT], 0
     
     IFE [CONTEXT_ID], 0 ;check if first process is starting up...
@@ -796,18 +807,20 @@ SET PC, boot
 :test_program
         
     SET A, 0x41
+    JSR yield
     ADD A, 1
     IFE A, 0x51
     SET A, 0x41
     JSR printChar
-    SUB PC, 8
+    SUB PC, 10
     
 :test_program_end
 
 :second_program
 
     JSR getPrintColVar
+    JSR yield
     ADD [A], 0x1000    
-    SUB PC, 3
+    SUB PC, 5
 
 :second_program_end
