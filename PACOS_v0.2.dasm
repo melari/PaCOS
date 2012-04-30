@@ -89,7 +89,7 @@ SET PC, boot
 :getBufferAddress
     SET PC, NO_DRIVER
     
-;A getPrintColVar(void)
+;A addr getPrintColVar(void)
 ; Returns the address to the PRINT_COL global variable to be read/set.  [7]
 :getPrintColVar
     SET PC, d_getPrintColVar
@@ -98,6 +98,21 @@ SET PC, boot
 ; Yield to the next process (for optional cooperative multi-tasking)    [8]
 :yield
     SET PC, d_yield
+    
+;A addr getMonitorAddress(void)
+; Returns the address to the monitor buffer                             [9]
+:getMonitorAddress
+    SET PC, NO_DRIVER
+
+;A addr getClockAddress(void)
+; Returns the address to the system clock                               [10]    
+:getClockAddress
+    SET PC, d_getClockAddress
+
+;A byte getClockSpeed(void)
+; Returns the system CLOCK_SPEED                                        [11]
+:getClockSpeed
+    SET PC, d_getClockSpeed
     
 
 
@@ -121,6 +136,13 @@ SET PC, boot
     SUB SP, 2
     SET PC, switchContext
     
+:d_getClockAddress
+    SET A, CLOCK
+    SET PC, POP
+    
+:d_getClockSpeed
+    SET A, [CLOCK_SPEED]
+    SET PC, POP
     
     
 ; ==== BIOS ==========================
@@ -191,14 +213,19 @@ SET PC, boot
     SET A, mes_logo             ; Display PaCOS logo
     JSR printLine
     
-    SET A, test_program_end
-    SUB A, test_program         ; Start a test process (letter printing)
-    SET B, test_program
-    JSR loadProgram
+    ;SET A, test_program_end
+    ;SUB A, test_program         ; Start a test process (letter printing)
+    ;SET B, test_program
+    ;JSR loadProgram
     
     SET A, second_program_end   ; Start a second process (color switching)
     SUB A, second_program
     SET B, second_program
+    JSR loadProgram
+    
+    SET A, prog_clock_end
+    SUB A, prog_clock
+    SET B, prog_clock
     JSR loadProgram
     
     IAS s_KERNEL_ISR            ; Enable interrupts (ie allow processes to start running)
@@ -218,7 +245,7 @@ SET PC, boot
     ;Find next context...
     SET A, [CONTEXT_ID]
     :_loop__switchContext
-    ADD A, 14
+    ADD A, 15
     IFE A, process_table_end
     SET A, s_PROCESS_TABLE
     IFC [A], 0x0001
@@ -247,6 +274,7 @@ SET PC, boot
     
     :_load__switchContext ; A should be pointing to new context by this point...
     SET [CONTEXT_ID], A
+    SET [CONTEXT_LIMIT], [A+14]
     SET B, [A+4]
     SET C, [A+5]
     SET X, [A+6]
@@ -305,7 +333,7 @@ SET PC, boot
     :_loop__newProcess
     IFC [I], 0x0001
     SET PC, _found__newProcess
-    ADD I, 14    
+    ADD I, 15    
     
     IFE I, process_table_end
     SET PC, _noroom__newProcess
@@ -316,6 +344,7 @@ SET PC, boot
     SET [I+1], A        ; sector_start
     SET [I+2], B        ; sector_end    
     SET [I+13], A       ; PC
+    SET [I+14], 1       ; priority
     
     SET PUSH, B
     ADD B, [SECTOR_SIZE]    ;SP starts at sectorEnd + SECTOR_SIZE - 1
@@ -361,18 +390,19 @@ SET PC, boot
 ; [1] sector start: First sector reserved by program
 ; [1] sector end: Last sector reserved by proram
 ; [11] context: saved copies of registers in order: ABCXYZIJ SP EX PC
+; [1] priority: Process is given (priority/freq) seconds each cycle.
 ;
 ; There is (currently) support for up to 8 concurrent processes.
 ; This could easily be increased to around 30 in the future. 
 :s_PROCESS_TABLE
-    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 :process_table_end
     
 
@@ -579,6 +609,9 @@ SET PC, boot
     SET A, clr
     SET [A+1], d_7349f615_1802_clr
     
+    SET A, getMonitorAddress
+    SET [A+1], d_7349f615_1802_getMonitorAddress
+    
     
     SET A, mes_monitor_startup
     JSR printLine
@@ -709,6 +742,10 @@ SET PC, boot
     SET Z, POP
     SET PC, POP
     
+:d_7349f615_1802_getMonitorAddress
+    SET A, d_7349f615_1802_video
+    SET PC, POP
+    
     
 ; ---- Generic Keyboard Driver ------------------
 :d_30cf7406_1
@@ -817,10 +854,52 @@ SET PC, boot
 :test_program_end
 
 :second_program
-
+    
     JSR getPrintColVar
     JSR yield
     ADD [A], 0x1000    
-    SUB PC, 5
+    IFE [A], 0
+      ADD [A], 0x1000
+    SUB PC, 7
 
 :second_program_end
+
+:prog_clock
+
+    ; A - working reg
+    ; B - seconds counter
+    ; C - print color address
+    ; X - monitor address
+    ; Y - Clock address
+    ; Z - clock frequency
+    
+    SET B, 0xFFFF
+    JSR getPrintColVar
+    SET C, A
+    JSR getMonitorAddress
+    SET X, A
+    JSR getClockAddress
+    SET Y, A
+    JSR getClockSpeed
+    SET Z, 60
+    DIV Z, A            ; Set Z to clock freq.
+    
+    SET A, [Y]
+    
+    ADD B, 1        ;increment seconds count
+    IFE B, 10
+      SET B, 0
+    ADD A, Z        ;calculate next target clock
+    SET [X], B      ;put seconds count to monitor
+    BOR [X], [C]    ;apply color
+    ADD [X], 0x30   ;convert to ascii
+    SET PUSH, A
+    SET A, [X]
+    JSR printChar
+    SET A, POP
+    IFG [Y], A  
+      SUB PC, 15
+    SUB PC, 3
+    
+
+:prog_clock_end
