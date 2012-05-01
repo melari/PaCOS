@@ -10,7 +10,7 @@
 ; ==== PROGRAM DEVELOPEMENT FOR PaCOS =======================
 ; PaCOS allows for several special parameters to be stored in the header
 ; of a program. Headers are optional. To specify that a header is included,
-; the first byte of the program should be 0xFFFF. The table format is as follows:
+; the first byte of the program should be 0xFFFF. The header format is as follows:
 
 ; Data Size         Description
 ;     1          Amount of additional memory required (after program code)
@@ -133,8 +133,10 @@ SET PC, boot
 :d_yield
     IAQ 1
     SET PUSH, A
-    SUB SP, 2
-    SET PC, switchContext
+    SUB SP, 1
+    JSR switchContext
+    ADD SP, 1
+    RFI
     
 :d_getClockAddress
     SET A, CLOCK
@@ -216,16 +218,19 @@ SET PC, boot
     ;SET A, test_program_end
     ;SUB A, test_program         ; Start a test process (letter printing)
     ;SET B, test_program
+    ;SET Z, 1
     ;JSR loadProgram
     
     SET A, second_program_end   ; Start a second process (color switching)
     SUB A, second_program
     SET B, second_program
+    SET Z, 1            ; yeild 60/1 = 60 times per second.
     JSR loadProgram
     
     SET A, prog_clock_end
     SUB A, prog_clock
     SET B, prog_clock
+    SET Z, 5            ; yeild 60/5 = 12 times per second
     JSR loadProgram
     
     IAS s_KERNEL_ISR            ; Enable interrupts (ie allow processes to start running)
@@ -298,17 +303,27 @@ SET PC, boot
     
     :_nextContext__switchContext DAT 0
     
-; void loadProgram(A byte filesize, B file* program)
+; void loadProgram(A byte filesize, B file* program, Z priority)
 :loadProgram   
     SET PUSH, J
     SET PUSH, I
     SET PUSH, X
-    SET PUSH, Y
-
+    SET PUSH, Y    
+    SET PUSH, C
+    
+    SET C, 0x0032 ;Default garunteed space for stack frame.
+    
+    IFN [B], 0xFFFF
+    SET PC, _noHeader__loadProgram
+    ADD B, 1
+    SET C, [B]  ;read needed extra memory space.
+    
+    
+    :_noHeader__loadProgram
     SET X, A    ;backup arguments.
     SET Y, B
-    
-    ADD A, 0x0032               ; extra for stack frame.
+        
+    ADD A, C               ; extra for stack frame.
     JSR reserveSectors         ; Load the test_program program.
     SET I, Y    ; src = progam file
     SET J, A    ; dest = sectorStart
@@ -319,13 +334,14 @@ SET PC, boot
     SET A, J
     JSR newProcess
     
+    SET C, POP
     SET Y, POP
     SET X, POP
     SET I, POP
     SET J, POP
     SET PC, POP
     
-; void newProcess(A sector* sectorStart, B sector* sectorEnd)
+; void newProcess(A sector* sectorStart, B sector* sectorEnd, Z priority)
 :newProcess
     SET PUSH, I
     
@@ -344,7 +360,7 @@ SET PC, boot
     SET [I+1], A        ; sector_start
     SET [I+2], B        ; sector_end    
     SET [I+13], A       ; PC
-    SET [I+14], 1       ; priority
+    SET [I+14], Z       ; priority
     
     SET PUSH, B
     ADD B, [SECTOR_SIZE]    ;SP starts at sectorEnd + SECTOR_SIZE - 1
@@ -366,15 +382,69 @@ SET PC, boot
 ; Eventually will apply relocation tables, ect.
 :relocateProgram
     SET PUSH, I
+    SET PUSH, J    
+    SET PUSH, A
+    SET PUSH, B
+    SET PUSH, C
+        
+    SET PUSH, J
     SET PUSH, J
     
     :_loop__relocateProgram
     STI [J], [I]
     IFG I, A
-    SET PC, _done__relocateProgram
+    SET PC, _doneCopy__relocateProgram
     SET PC, _loop__relocateProgram
     
-    :_done__relocateProgram
+    :_doneCopy__relocateProgram
+    
+    SET A, POP
+    IFN [A+2], 0x5254
+    SET PC, _skip__relocateProgram
+    JSR relocate        
+    SET A, POP
+    ADD A, 1
+    SET [A], B
+    SET PC, _done__relocateProgram
+    
+    ;; Relocator
+    :relcount
+    DAT 0x0000
+    :reloff
+    DAT 0x0000
+    :relocate
+    SET PUSH, I
+    SET B, A
+    ADD A, 0x0001
+    SET [reloff], [A]
+    SUB [reloff], 0x0001
+    ADD A, 0x0003
+    SET [relcount], [A]
+    SET I, 0x0000
+    ADD A, 0x0001
+    :relo_loop
+    SET C, B
+    ADD C, [reloff]
+    ADD C, [A]
+    ADD [C], B
+    ADD I, 0x0001
+    ADD A, 0x0001
+    IFG [relcount], I
+    SET PC, relo_loop
+    :relo_end
+    ADD B, [reloff]
+    ADD B, 0x0001
+    SET I, POP
+    SET PC, POP
+    
+    :_skip__relocateProgram
+    SET A, POP
+    
+
+    :_done__relocateProgram    
+    SET C, POP
+    SET B, POP
+    SET A, POP
     SET J, POP
     SET I, POP
     SET PC, POP
@@ -854,13 +924,17 @@ SET PC, boot
 :test_program_end
 
 :second_program
-    
-    JSR getPrintColVar
-    JSR yield
-    ADD [A], 0x1000    
-    IFE [A], 0
-      ADD [A], 0x1000
-    SUB PC, 7
+        
+    DAT 0x7f81, 0x0006 ; SET PC, start
+    DAT 0x5254, 0x0001, 0x0001, 0x0009 ; Relocation Table
+;   :start
+    DAT 0xc420  ; JSR 16 (getPrintColVar)
+;   :loop
+    DAT 0xcc20  ; JSR 18 (yield)
+    DAT 0x7d02, 0x1000 ; ADD [A], 0x1000
+    DAT 0x8512  ; IFE [A], 0x0000
+    DAT 0x7d02, 0x1000 ; ADD [A], 0x1000
+    DAT 0x7f81, 0x0007 ; SET PC, loop
 
 :second_program_end
 
@@ -890,8 +964,8 @@ SET PC, boot
     IFE B, 10
       SET B, 0
     ADD A, Z        ;calculate next target clock
-    SET [X], B      ;put seconds count to monitor
-    BOR [X], [C]    ;apply color
+    SET [X], B      ;put seconds count to monitor    
+    BOR [X], [C]    ;apply color        
     ADD [X], 0x30   ;convert to ascii
     SET PUSH, A
     SET A, [X]
