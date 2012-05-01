@@ -155,10 +155,10 @@ SET PC, boot
 :boot
     
     HWN I                        ; Search for a monitor device first
-    :_monloop__boot
+    :.monloop
     SUB I, 1
     IFE I, 0xFFFF
-    SET PC, _hwstart__boot
+    SET PC, .hwstart
     HWQ I
     
     ; LEM1802 Monitor
@@ -166,15 +166,15 @@ SET PC, boot
     IFE B, 0x7349
     JSR d_7349f615_1802_install
     
-    SET PC, _monloop__boot
+    SET PC, .monloop
     
     
-    :_hwstart__boot
+    :.hwstart
     HWN I                       ; Handle remaining IO devices
-    :_hwloop__boot
+    :.hwloop
     SUB I, 1
     IFE I, 0xFFFF
-    SET PC, _hwdone__boot
+    SET PC, .hwdone
     HWQ I
     
     
@@ -189,9 +189,9 @@ SET PC, boot
     IFE B, 0x12D0
     JSR d_12D0B402_1_install
         
-    SET PC, _hwloop__boot
+    SET PC, .hwloop
     
-    :_hwdone__boot
+    :.hwdone
     SET A, mes_boot_complete
     JSR printLine
  
@@ -203,11 +203,11 @@ SET PC, boot
 :s_KERNEL
     
     IFE [boot_req_hw], 0xFFFF   ; Check that all manditory hardware was installed.
-    SET PC, _done_reqhw
+    SET PC, .done_reqhw
     SET A, mes_lack_hw
     JSR print
     SET PC, crash
-    :_done_reqhw
+    :.done_reqhw
     
     SET A, s_ALLOCATION        ; Reserve OS space
     JSR reserveSectors    
@@ -245,21 +245,21 @@ SET PC, boot
     SET [CONTEXT_COUNT], 0
     
     IFE [CONTEXT_ID], 0 ;check if first process is starting up...
-    SET PC, _first__switchContext
+    SET PC, .first
         
     ;Find next context...
     SET A, [CONTEXT_ID]
-    :_loop__switchContext
+    :.loop
     ADD A, 15
     IFE A, process_table_end
     SET A, s_PROCESS_TABLE
     IFC [A], 0x0001
-    SET PC, _loop__switchContext
+    SET PC, .loop
     
     IFE A, [CONTEXT_ID] ;next context == current context.. just stop here.
     SET PC, POP
     
-    SET [_nextContext__switchContext], A
+    SET [.nextContext], A
     SET A, [CONTEXT_ID]
     ADD SP, 2   ; remove return addresses for switchContext and the clock driver ISR
     SET [A+3], POP  ; Saved A value from before interrupt
@@ -274,10 +274,10 @@ SET PC, boot
     ADD [A+11], 1    ; Account for the excess PC still sitting on the stack.
     SET [A+12], EX
     SET [A+13], POP ; Saved PC value from before interrupt.    
-    SET A, [_nextContext__switchContext]
+    SET A, [.nextContext]
     
     
-    :_load__switchContext ; A should be pointing to new context by this point...
+    :.load ; A should be pointing to new context by this point...
     SET [CONTEXT_ID], A
     SET [CONTEXT_LIMIT], [A+14]
     SET B, [A+4]
@@ -294,14 +294,14 @@ SET PC, boot
     RFI                 ; enables interrupts and sets SP and A.    
     
     
-    :_first__switchContext
+    :.first
     IFC [s_PROCESS_TABLE], 0x0001   ;no processes running...
     SET PC, POP
     SET A, s_PROCESS_TABLE
     ADD SP, 4   ; remove RET1, RET2, A, and SP from stack
-    SET PC, _load__switchContext
+    SET PC, .load
     
-    :_nextContext__switchContext DAT 0
+    :.nextContext DAT 0
     
 ; void loadProgram(A byte filesize, B file* program, Z priority)
 :loadProgram   
@@ -314,12 +314,12 @@ SET PC, boot
     SET C, 0x0032 ;Default garunteed space for stack frame.
     
     IFN [B], 0xFFFF
-    SET PC, _noHeader__loadProgram
+    SET PC, .noHeader
     ADD B, 1
     SET C, [B]  ;read needed extra memory space.
     
     
-    :_noHeader__loadProgram
+    :.noHeader
     SET X, A    ;backup arguments.
     SET Y, B
         
@@ -346,16 +346,16 @@ SET PC, boot
     SET PUSH, I
     
     SET I, s_PROCESS_TABLE
-    :_loop__newProcess
+    :.loop
     IFC [I], 0x0001
-    SET PC, _found__newProcess
+    SET PC, .found
     ADD I, 15    
     
     IFE I, process_table_end
-    SET PC, _noroom__newProcess
-    SET PC, _loop__newProcess
+    SET PC, .noroom
+    SET PC, .loop
     
-    :_found__newProcess
+    :.found
     BOR [I], 0x0001     ; status
     SET [I+1], A        ; sector_start
     SET [I+2], B        ; sector_end    
@@ -368,12 +368,12 @@ SET PC, boot
     SET [I+11], B       ; SP    
     SET B, POP
     
-    SET PC, _done__newProcess
+    SET PC, .done
     
-    :_noroom__newProcess
+    :.noroom
     ; not sure what will go here.... silently fails for now.
     
-    :_done__newProcess    
+    :.done
     SET I, POP
     SET PC, POP
     
@@ -390,58 +390,58 @@ SET PC, boot
     SET PUSH, J
     SET PUSH, J
     
-    :_loop__relocateProgram
+    :.loop
     STI [J], [I]
     IFG I, A
-    SET PC, _doneCopy__relocateProgram
-    SET PC, _loop__relocateProgram
+    SET PC, .doneCopy
+    SET PC, .loop
     
-    :_doneCopy__relocateProgram
+    :.doneCopy
     
     SET A, POP
     IFN [A+2], 0x5254
-    SET PC, _skip__relocateProgram
-    JSR relocate        
+    SET PC, .skip
+    JSR .relocate        
     SET A, POP
     ADD A, 1
     SET [A], B
-    SET PC, _done__relocateProgram
+    SET PC, .done
     
     ;; Relocator
-    :relcount
+    :.relcount
     DAT 0x0000
-    :reloff
+    :.reloff
     DAT 0x0000
-    :relocate
+    :.relocate
     SET PUSH, I
     SET B, A
     ADD A, 0x0001
-    SET [reloff], [A]
-    SUB [reloff], 0x0001
+    SET [.reloff], [A]
+    SUB [.reloff], 0x0001
     ADD A, 0x0003
-    SET [relcount], [A]
+    SET [.relcount], [A]
     SET I, 0x0000
     ADD A, 0x0001
-    :relo_loop
+    :.relo_loop
     SET C, B
-    ADD C, [reloff]
+    ADD C, [.reloff]
     ADD C, [A]
     ADD [C], B
     ADD I, 0x0001
     ADD A, 0x0001
-    IFG [relcount], I
-    SET PC, relo_loop
-    :relo_end
-    ADD B, [reloff]
+    IFG [.relcount], I
+    SET PC, .relo_loop
+    :.relo_end
+    ADD B, [.reloff]
     ADD B, 0x0001
     SET I, POP
     SET PC, POP
     
-    :_skip__relocateProgram
+    :.skip
     SET A, POP
     
 
-    :_done__relocateProgram    
+    :.done
     SET C, POP
     SET B, POP
     SET A, POP
@@ -517,49 +517,49 @@ SET PC, boot
     SET A, B
     
     
-    :_loop__reserveSectors
+    :.loop
     IFE B, allocation_table_end
-    SET PC, _noroom__reserveSectors
+    SET PC, .noroom
     
     IFB [B], 0x0001
-    SET PC, _next__reserveSectors
+    SET PC, .next
     
     SUB J, 1
     IFE J, 0
-    SET PC, _doReserve__reserveSectors
+    SET PC, .doReserve
     
     ADD B, 1    
-    SET PC, _loop__reserveSectors
+    SET PC, .loop
     
     
-    :_next__reserveSectors
+    :.next
     ADD B, 1    
     SET A, B
     SET J, I
-    SET PC, _loop__reserveSectors
+    SET PC, .loop
     
     
-    :_doReserve__reserveSectors  ; A-start, B-end
+    :.doReserve  ; A-start, B-end
     SET I, A
-    :_reserveLoop__reserveSectors
+    :.reserveLoop
     BOR [I], 0x0001
     ADD I, 1
     IFG I, B
-    SET PC, _convert__reserveSectors
-    SET PC, _reserveLoop__reserveSectors
+    SET PC, .convert
+    SET PC, .reserveLoop
     
-    :_convert__reserveSectors
+    :.convert
     SUB A, s_ALLOCATION_TABLE
     SUB B, s_ALLOCATION_TABLE
     MUL A, [SECTOR_SIZE]
     MUL B, [SECTOR_SIZE]    
-    SET PC, _done__reserveSectors
+    SET PC, .done
     
-    :_noroom__reserveSectors
+    :.noroom
     SET A, 0xFFFF
     SET B, 0xFFFF    
     
-    :_done__reserveSectors
+    :.done
     SET J, POP
     SET I, POP
     SET PC, POP
@@ -623,8 +623,8 @@ SET PC, boot
     
 ; ---- LEM1802 DRIVER --------------
 :d_7349f615_1802
-    :CURSOR_LOC DAT 0
-    :mes_monitor_startup DAT "Detecting Hardware...", 0x000A, 0x000A
+    :d_7349f615_1802_CURSOR_LOC DAT 0
+    :d_7349f615_1802_mes_monitor_startup DAT "Detecting Hardware...", 0x000A, 0x000A
                          DAT "Device Name      | Driver ver #", 0x000A
                          DAT "LEM1802          | 1802 ", 0x0000
     :d_7349f615_1802_video DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -662,64 +662,64 @@ SET PC, boot
     SET B, d_7349f615_1802_video            ; Map the video RAM
     HWI I
     
-    SET [CURSOR_LOC], d_7349f615_1802_video ; Set the cursor to the first position.
+    SET [d_7349f615_1802_CURSOR_LOC], d_7349f615_1802_video ; Set the cursor to the first position.
     
     SET A, printChar
-    SET [A+1], d_7349f615_1802_printChar
+    SET [A+1], .printChar
     
     SET A, newLine
-    SET [A+1], d_7349f615_1802_newLine
+    SET [A+1], .newLine
     
     SET A, shiftView
-    SET [A+1], d_7349f615_1802_shiftView
+    SET [A+1], .shiftView
     
     SET A, print
-    SET [A+1], d_7349f615_1802_print    
+    SET [A+1], .print    
     
     SET A, clr
-    SET [A+1], d_7349f615_1802_clr
+    SET [A+1], .clr
     
     SET A, getMonitorAddress
-    SET [A+1], d_7349f615_1802_getMonitorAddress
+    SET [A+1], .getMonitorAddress
     
     
-    SET A, mes_monitor_startup
+    SET A, d_7349f615_1802_mes_monitor_startup
     JSR printLine
     
     SET B, POP
     SET A, POP
     SET PC, POP
     
-:d_7349f615_1802_printChar
+:.printChar
     SET PUSH, A
     SET PUSH, Z    
     
 	IFE A, 0x000A
-    SET PC, _newline__7349f615_1802_printChar
+    SET PC, ._newline__printChar
     
     AND A, 0x00FF
     BOR A, [PRINT_COL]
-    SET Z, [CURSOR_LOC]
+    SET Z, [d_7349f615_1802_CURSOR_LOC]
     SET [Z], A
     ADD Z, 1
-    SET [CURSOR_LOC], Z
+    SET [d_7349f615_1802_CURSOR_LOC], Z
     
     IFG Z, d_7349f615_1802_videoLast ;Passed end of console output
     JSR newLine
-    SET PC, _done__7349f615_1802_printChar
+    SET PC, ._done__printChar
     
-    :_newline__7349f615_1802_printChar
+    :._newline__printChar
     JSR newLine    
     
-    :_done__7349f615_1802_printChar    
+    :._done__printChar    
     SET Z, POP
     SET A, POP    
     SET PC, POP
     
     
-:d_7349f615_1802_newLine
+:.newLine
     SET PUSH, Z
-    SET Z, [CURSOR_LOC]
+    SET Z, [d_7349f615_1802_CURSOR_LOC]
 
     SUB Z, d_7349f615_1802_video
     DIV Z, 32
@@ -727,47 +727,47 @@ SET PC, boot
     MUL Z, 32
     ADD Z, d_7349f615_1802_video
     IFG Z, d_7349f615_1802_videoLast
-    SET PC, _offscreen__d_7349f615_1802_newLine
-    SET PC, _done__d_7349f615_1802_newLine
+    SET PC, ._offscreen__newLine
+    SET PC, ._done__newLine
     
-    :_offscreen__d_7349f615_1802_newLine
+    :._offscreen__newLine
     SET Z, d_7349f615_1802_videoLastRow
     JSR shiftView
     
-    :_done__d_7349f615_1802_newLine
-    SET [CURSOR_LOC], Z
+    :._done__newLine
+    SET [d_7349f615_1802_CURSOR_LOC], Z
     SET Z, POP
     SET PC, POP
     
     
-:d_7349f615_1802_shiftView
+:.shiftView
 	SET PUSH, X
     SET PUSH, Y
     
     SET X, d_7349f615_1802_video
-    :_loop__d_7349f615_1802_shiftView			; Move all rows upwards (except last)
+    :._loop__shiftView			; Move all rows upwards (except last)
     SET Y, X
     ADD Y, 0x0020
     SET [X], [Y]
     ADD X, 1
     IFE X, d_7349f615_1802_videoLastRow
-    SET PC, _next__d_7349f615_1802_shiftView
-    SET PC, _loop__d_7349f615_1802_shiftView
+    SET PC, ._next__shiftView
+    SET PC, ._loop__shiftView
     
-    :_next__d_7349f615_1802_shiftView			; Clear bottom row
+    :._next__shiftView			; Clear bottom row
     SET [X], 0x0020
     ADD X, 1
     IFG X, d_7349f615_1802_videoLast
-    SET PC, _end__d_7349f615_1802_shiftView
-    SET PC, _next__d_7349f615_1802_shiftView
+    SET PC, ._end__shiftView
+    SET PC, ._next__shiftView
     
- 	:_end__d_7349f615_1802_shiftView
+ 	:._end__shiftView
     SET Y, POP
     SET X, POP
 	SET PC, POP
     
 
-:d_7349f615_1802_print
+:.print
     SET PUSH, A
 	SET PUSH, X
     SET PUSH, I
@@ -776,43 +776,43 @@ SET PC, boot
     ;check for color bit
     SET X, [PRINT_COL]
     IFN [I], 0xFFFF
-    SET PC, _loop__d_7349f615_1802_print
+    SET PC, ._loop__print
     ADD I, 1
     SET [PRINT_COL], [I]
     ADD I, 1
     
-    :_loop__d_7349f615_1802_print
+    :._loop__print
     SET A, [I]
     IFE A, 0x0000
-    SET PC, _done__d_7349f615_1802_print
+    SET PC, ._done__print
     JSR printChar
     ADD I, 1
-    SET PC, _loop__d_7349f615_1802_print
+    SET PC, ._loop__print
 
-    :_done__d_7349f615_1802_print
+    :._done__print
     SET [PRINT_COL], X
     SET I, POP
     SET X, POP    
     SET A, POP
     SET PC, POP
     
-:d_7349f615_1802_clr
+:.clr
     SET PUSH, Z
-    SET Z, [CURSOR_LOC]
+    SET Z, [d_7349f615_1802_CURSOR_LOC]
     
     SET Z, d_7349f615_1802_video
-    :_loop__d_7349f615_1802_clr
+    :._loop__clr
     SET [Z], 0x0000
     ADD Z, 1
     IFN Z, d_7349f615_1802_videoEnd
-    SET PC, _loop__d_7349f615_1802_clr
+    SET PC, ._loop__clr
     SET Z, d_7349f615_1802_video
     
-    SET [CURSOR_LOC], Z
+    SET [d_7349f615_1802_CURSOR_LOC], Z
     SET Z, POP
     SET PC, POP
     
-:d_7349f615_1802_getMonitorAddress
+:.getMonitorAddress
     SET A, d_7349f615_1802_video
     SET PC, POP
     
@@ -851,7 +851,7 @@ SET PC, boot
     SET A, 1
     HWI [d_30cf7406_1_IO_ADD]
     IFE C, 0    ; buffer is empty (ie intr caused by key pressed/released events)
-    SET PC, _skip__d_30cf7406_1_ISR
+    SET PC, .skip
     
     SET A, [d_30cf7406_1_bufPoint]
     SET [A], C
@@ -860,7 +860,7 @@ SET PC, boot
     SET A, d_30cf7406_1_buf
     SET [d_30cf7406_1_bufPoint], A
     
-    :_skip__d_30cf7406_1_ISR
+    :.skip
     SET C, POP
     SET PC, POP
     
