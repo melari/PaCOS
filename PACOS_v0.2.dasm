@@ -53,67 +53,82 @@ SET PC, boot
 :s_API_TABLE    
     
 
-;                                                                  Instruction ID
-;void printChar(A char character)                                       [0]
+;                                                                  Instruction ID         Address
+;void printChar(A char character)                                       [0]                 [2 | 0x2]
 ; Print a single character to the console.
 :printChar
     SET PC, NO_DRIVER
       
-;void newLine(void)                                                     [1]
+;void newLine(void)                                                     [1]                 [4 | 0x4]
 ; Move to next line
 :newLine
     SET PC, NO_DRIVER
     
-;void shiftView(void)                                                   [2]
+;void shiftView(void)                                                   [2]                 [6 | 0x6]
 ; Moves all characters up one line
 :shiftView
     SET PC, NO_DRIVER
     
-;void print(A string* message)                                          [3]
+;void print(A string* message)                                          [3]                 [8 | 0x8]
 ; Prints a string to the console
 :print
     SET PC, NO_DRIVER
 
-;void printLine(A string* message)                                      [4]
+;void printLine(A string* message)                                      [4]                 [10 | 0xA]
 ; Prints a string to the console followed by a newline.
 :printLine
     SET PC, d_printLine
 
-;void clr(void)                                                         [5]
+;void clr(void)                                                         [5]                 [12 | 0xC]
 ; clears all terminal values.
 :clr
     SET PC, NO_DRIVER
     
 ;A buffer* getBufferAddress(void)
-; Returns the address of the cyclic keyboard input buffer               [6]
+; Returns the address of the cyclic keyboard input buffer               [6]                 [14 | 0xE]
 :getBufferAddress
     SET PC, NO_DRIVER
     
 ;A addr getPrintColVar(void)
-; Returns the address to the PRINT_COL global variable to be read/set.  [7]
+; Returns the address to the PRINT_COL global variable to be read/set.  [7]                 [16 | 0x10]
 :getPrintColVar
     SET PC, d_getPrintColVar
     
 ;void yield(void)
-; Yield to the next process (for optional cooperative multi-tasking)    [8]
+; Yield to the next process (for optional cooperative multi-tasking)    [8]                 [18 | 0x12]
 :yield
     SET PC, d_yield
     
 ;A addr getMonitorAddress(void)
-; Returns the address to the monitor buffer                             [9]
+; Returns the address to the monitor buffer                             [9]                 [20 | 0x14]
 :getMonitorAddress
     SET PC, NO_DRIVER
 
 ;A addr getClockAddress(void)
-; Returns the address to the system clock                               [10]    
+; Returns the address to the system clock                               [10]                [22 | 0x16]    
 :getClockAddress
     SET PC, d_getClockAddress
 
 ;A byte getClockSpeed(void)
-; Returns the system CLOCK_SPEED                                        [11]
+; Returns the system CLOCK_SPEED                                        [11]                [24 | 0x28]
 :getClockSpeed
     SET PC, d_getClockSpeed
     
+;A proc_id loadProgram(A byte filesize, B file* program, Z priority)
+; Starts a new process with a given priority by running the             [12]                [26 | 0x2A]
+;program pointed at by program, with length filesize.
+:loadProgram
+    SET PC, d_loadProgram
+    
+;void killProcess(A proc_id)
+; Kills the process with the given ID.                                  [13]                [28 | 0x2C]
+:killProcess
+    SET PC, d_killProcess
+    
+;void killSelf(void)
+; Kills the process with the current CONTEXT_ID (ie caller)             [14]                [30 | 0x2E]
+:killSelf
+    SET PC, d_killSelf
 
 
 ; ==== API SUPPORT =====================
@@ -221,11 +236,11 @@ SET PC, boot
     ;SET Z, 1
     ;JSR loadProgram
     
-    SET A, second_program_end   ; Start a second process (color switching)
-    SUB A, second_program
-    SET B, second_program
-    SET Z, 1            ; yeild 60/1 = 60 times per second.
-    JSR loadProgram
+    ;SET A, second_program_end   ; Start a second process (color switching)
+    ;SUB A, second_program
+    ;SET B, second_program
+    ;SET Z, 1            ; yeild 60/1 = 60 times per second.
+    ;JSR loadProgram
     
     SET A, prog_clock_end
     SUB A, prog_clock
@@ -241,15 +256,22 @@ SET PC, boot
 ; void switchContext(void)
 ; Should be called by the installed clock driver to notify the kernel
 ; that it is time for a context switch.
-:switchContext
+:switchContext        
     SET [CONTEXT_COUNT], 0
+    
+    SET A, [CONTEXT_ID]
     
     IFE [CONTEXT_ID], 0 ;check if first process is starting up...
     SET PC, .first
+    
+    SET PUSH, B
+    SET B, 0
+    IFB [A], 0x0002 ;check if this process should be stopped.
+    SET PC, .kill
+    :.continue
         
-    ;Find next context...
-    SET A, [CONTEXT_ID]
-    :.loop
+    ;Find next context...    
+    :.loop    
     ADD A, 15
     IFE A, process_table_end
     SET A, s_PROCESS_TABLE
@@ -257,7 +279,11 @@ SET PC, boot
     SET PC, .loop
     
     IFE A, [CONTEXT_ID] ;next context == current context.. just stop here.
-    SET PC, POP
+    SET PC, .sameContext
+    
+    IFE B, 1        ; If B is one, then the process was just killed and should not be saved.
+    SET PC, .skipSave
+    SET B, POP
     
     SET [.nextContext], A
     SET A, [CONTEXT_ID]
@@ -276,6 +302,9 @@ SET PC, boot
     SET [A+13], POP ; Saved PC value from before interrupt.    
     SET A, [.nextContext]
     
+    SET PC, .load
+    :.skipSave
+    SET B, POP    
     
     :.load ; A should be pointing to new context by this point...
     SET [CONTEXT_ID], A
@@ -293,6 +322,15 @@ SET PC, boot
     SET PUSH, [A+3]     ; push wanted A  to stack
     RFI                 ; enables interrupts and sets SP and A.    
     
+    :.kill
+    BRK
+    SET B, 1
+    AND [A], 0xFFFC ;clear used bit and kill bit
+    SET PC, .continue
+    
+    :.sameContext
+    SET B, POP
+    SET PC, POP
     
     :.first
     IFC [s_PROCESS_TABLE], 0x0001   ;no processes running...
@@ -304,7 +342,7 @@ SET PC, boot
     :.nextContext DAT 0
     
 ; void loadProgram(A byte filesize, B file* program, Z priority)
-:loadProgram   
+:d_loadProgram   
     SET PUSH, J
     SET PUSH, I
     SET PUSH, X
@@ -341,7 +379,7 @@ SET PC, boot
     SET J, POP
     SET PC, POP
     
-; void newProcess(A sector* sectorStart, B sector* sectorEnd, Z priority)
+;A proc_id newProcess(A sector* sectorStart, B sector* sectorEnd, Z priority)
 :newProcess
     SET PUSH, I
     
@@ -358,7 +396,16 @@ SET PC, boot
     :.found
     BOR [I], 0x0001     ; status
     SET [I+1], A        ; sector_start
-    SET [I+2], B        ; sector_end    
+    SET [I+2], B        ; sector_end  
+    SET [I+3], 0        ; A
+    SET [I+4], 0        ; B
+    SET [I+5], 0        ; C
+    SET [I+6], 0        ; X
+    SET [I+7], 0        ; Y
+    SET [I+8], 0        ; Z
+    SET [I+9], 0        ; I
+    SET [I+10], 0       ; J
+    SET [I+12], 0       ; EX
     SET [I+13], A       ; PC
     SET [I+14], Z       ; priority
     
@@ -368,6 +415,7 @@ SET PC, boot
     SET [I+11], B       ; SP    
     SET B, POP
     
+    SET A, I
     SET PC, .done
     
     :.noroom
@@ -448,6 +496,25 @@ SET PC, boot
     SET J, POP
     SET I, POP
     SET PC, POP
+    
+    
+;void d_killProcess(A proc_id process)
+:d_killProcess
+    IFN A, [CONTEXT_ID]
+    SET PC, .other
+    
+    BOR [A], 0x0002 ;Mark toKill bit    
+    SET PC, yield
+    
+    :.other
+    AND [A], 0xFFFE ;Mark as unused in process table    
+    SET PC, POP
+    
+;void d_killSelf(void)
+:d_killSelf        
+    SET A, [CONTEXT_ID]
+    BOR [A], 0x0002    
+    SET PC, yield
 
 
 ; ==== PROCESS TABLE =====================
@@ -457,6 +524,7 @@ SET PC, boot
 ; [1] status byte
 ;     --> abcd efgh ijkl mnop
 ;         p: used (unused/used)
+;         o: toKill (continue/kill)
 ; [1] sector start: First sector reserved by program
 ; [1] sector end: Last sector reserved by proram
 ; [11] context: saved copies of registers in order: ABCXYZIJ SP EX PC
@@ -897,7 +965,7 @@ SET PC, boot
 :d_12D0B402_1_ISR
     ADD [CLOCK], 1
     ADD [CONTEXT_COUNT], 1
-    IFE [CONTEXT_COUNT], [CONTEXT_LIMIT]
+    IFE [CONTEXT_COUNT], [CONTEXT_LIMIT]    
     JSR switchContext
     SET PC, POP
     
@@ -961,8 +1029,8 @@ SET PC, boot
     SET A, [Y]
     
     ADD B, 1        ;increment seconds count
-    IFE B, 10
-      SET B, 0
+    IFE B, 10      
+      ADD PC, 13
     ADD A, Z        ;calculate next target clock
     SET [X], B      ;put seconds count to monitor    
     BOR [X], [C]    ;apply color        
@@ -974,6 +1042,13 @@ SET PC, boot
     IFG [Y], A  
       SUB PC, 15
     SUB PC, 3
+    
+    SET PUSH, A
+    SET A, s_PROCESS_TABLE  ;kill the first running process.
+    SET B, 0
+    JSR killProcess
+    SET A, POP
+    SUB PC, 23
     
 
 :prog_clock_end
