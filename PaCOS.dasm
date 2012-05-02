@@ -38,7 +38,7 @@
 ; what programs are run, as PaCOS can offer no protection from
 ; malicious code.
 
-SET PC, boot
+SET PC, s_BIOS
 
 
 ; ==== API table ===================
@@ -167,7 +167,6 @@ SET PC, boot
 
 :s_BIOS
 
-:boot
     
     HWN I                        ; Search for a monitor device first
     :.monloop
@@ -236,11 +235,11 @@ SET PC, boot
     ;SET Z, 1
     ;JSR loadProgram
     
-    ;SET A, second_program_end   ; Start a second process (color switching)
-    ;SUB A, second_program
-    ;SET B, second_program
-    ;SET Z, 1            ; yeild 60/1 = 60 times per second.
-    ;JSR loadProgram
+    SET A, second_program_end   ; Start a second process (color switching)
+    SUB A, second_program
+    SET B, second_program
+    SET Z, 1            ; yeild 60/1 = 60 times per second.
+    JSR loadProgram
     
     SET A, prog_clock_end
     SUB A, prog_clock
