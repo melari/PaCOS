@@ -84,9 +84,9 @@ SET PC, s_BIOS
 :clr
     SET PC, NO_DRIVER
     
-;A buffer* getBufferAddress(void)
+;A buffer* getKeyBufferAddress(void)
 ; Returns the address of the cyclic keyboard input buffer               [6]                 [14 | 0xE]
-:getBufferAddress
+:getKeyBufferAddress
     SET PC, NO_DRIVER
     
 ;A addr getPrintColVar(void)
@@ -129,6 +129,11 @@ SET PC, s_BIOS
 ; Kills the process with the current CONTEXT_ID (ie caller)             [14]                [30 | 0x2E]
 :killSelf
     SET PC, d_killSelf
+    
+;void deleteChar(void)
+; Deletes one character from the monitor                                [15]                [32 | 0x30]
+:deleteChar
+    SET PC, NO_DRIVER
 
 
 ; ==== API SUPPORT =====================
@@ -228,6 +233,7 @@ SET PC, s_BIOS
     
     SET A, mes_logo             ; Display PaCOS logo
     JSR printLine
+    JSR newLine
     
     ;SET A, test_program_end
     ;SUB A, test_program         ; Start a test process (letter printing)
@@ -235,22 +241,29 @@ SET PC, s_BIOS
     ;SET Z, 1
     ;JSR loadProgram
     
-    SET A, second_program_end   ; Start a second process (color switching)
-    SUB A, second_program
-    SET B, second_program
-    SET Z, 1            ; yeild 60/1 = 60 times per second.
-    JSR loadProgram
+    ;SET A, second_program_end   ; Start a second process (color switching)
+    ;SUB A, second_program
+    ;SET B, second_program
+    ;SET Z, 1            ; yeild 60/1 = 60 times per second.
+    ;JSR loadProgram
     
-    SET A, prog_clock_end
-    SUB A, prog_clock
-    SET B, prog_clock
-    SET Z, 5            ; yeild 60/5 = 12 times per second
-    JSR loadProgram
+    ;SET A, prog_clock_end
+    ;SUB A, prog_clock
+    ;SET B, prog_clock
+    ;SET Z, 5            ; yeild 60/5 = 12 times per second
+    ;JSR loadProgram
+    
     ;SET A, prog_clock_rel_end
     ;SUB A, prog_clock_rel
     ;SET B, prog_clock_rel
     ;SET Z, 5
     ;JSR loadProgram
+    
+    SET A, prog_ether_end
+    SUB A, prog_ether
+    SET B, prog_ether
+    SET Z, 0xFFFF
+    JSR loadProgram
     
     IAS s_KERNEL_ISR            ; Enable interrupts (ie allow processes to start running)
     IAQ 0     
@@ -754,6 +767,9 @@ SET PC, s_BIOS
     SET A, getMonitorAddress
     SET [A+1], .getMonitorAddress
     
+    SET A, deleteChar
+    SET [A+1], .deleteChar
+    
     
     SET A, d_7349f615_1802_mes_monitor_startup
     JSR printLine
@@ -888,6 +904,15 @@ SET PC, s_BIOS
     SET A, d_7349f615_1802_video
     SET PC, POP
     
+:.deleteChar    
+    SET PUSH, Z
+    SET Z, [d_7349f615_1802_CURSOR_LOC]
+    SUB Z, 1
+    SET [Z], 0
+    SET [d_7349f615_1802_CURSOR_LOC], Z
+    SET Z, POP
+    SET PC, POP
+    
     
 ; ---- Generic Keyboard Driver ------------------
 :d_30cf7406_1
@@ -904,7 +929,7 @@ SET PC, s_BIOS
     BOR [boot_req_hw], 0x0002           ; Mark req_hw having installed a keyboard
     SET [d_30cf7406_1_IO_ADD], I        ; Save the IO address for this device.
     
-    SET A, getBufferAddress
+    SET A, getKeyBufferAddress
     SET [A+1], d_30cf7406_1_getBufferAddress
     
     SET B, d_30cf7406_1_ISR             ; Activate interrupts
@@ -1060,3 +1085,7 @@ SET PC, s_BIOS
 :prog_clock_rel
 DAT 0x7f81, 0x0007, 0x5254, 0x0001, 0x0002, 0x0024, 0x0026, 0x7c21, 0xffff, 0x7c20, 0x0010, 0x0041, 0x7c20, 0x0014, 0x0061, 0x7c20, 0x0016, 0x0081, 0x7c20, 0x0018, 0x7ca1, 0x003c, 0x00a6, 0x3001, 0x7c22, 0x0001, 0x7c32, 0x000a, 0x7c21, 0x0000, 0x1402, 0x0561, 0x296b, 0x7d62, 0x0030, 0x0301, 0x2c01, 0x7c20, 0x0002, 0x6001, 0x0194, 0x7f81, 0x0018, 0x7f81, 0x0028
 :prog_clock_rel_end
+
+:prog_ether
+DAT 0x7f81, 0x0013, 0x5254, 0x0001, 0x000e, 0x0002, 0x0004, 0x000e, 0x0012, 0x0014, 0x0016, 0x001a, 0x001e, 0x0022, 0x002f, 0x0034, 0x0038, 0x003e, 0x0042, 0x7ca1, 0x00a7, 0x7c01, 0x0058, 0x7c20, 0x0008, 0x7c20, 0x000e, 0x0061, 0x0081, 0x7c82, 0x000a, 0x7c01, 0x008f, 0x7c20, 0x0008, 0x7c20, 0x0029, 0x7c20, 0x0053, 0x7f81, 0x001f, 0x0301, 0x0d92, 0x7f81, 0x002a, 0x7d72, 0x0011, 0x7f81, 0x0042, 0x7d72, 0x0010, 0x7f81, 0x004b, 0x2da1, 0x7ca2, 0x0001, 0x2c01, 0x7c20, 0x0002, 0x7c62, 0x0001, 0x1072, 0x7c63, 0x000a, 0x7f81, 0x002a, 0x3061, 0x7da1, 0x0000, 0x7ca1, 0x00a7, 0x7c20, 0x0004, 0x7f81, 0x0051, 0x7c20, 0x0020, 0x7ca3, 0x0001, 0x7f81, 0x003b, 0x6001, 0x6381, 0x7c01, 0x0094, 0x7c20, 0x000a, 0x6381, 0x0045, 0x0074, 0x0068, 0x0065, 0x0072, 0x0020, 0x0054, 0x0065, 0x0072, 0x006d, 0x0069, 0x006e, 0x0061, 0x006c, 0x0020, 0x0052, 0x0065, 0x0061, 0x0064, 0x0079, 0x002e, 0x000a, 0x0054, 0x0079, 0x0070, 0x0065, 0x0020, 0x0068, 0x0065, 0x006c, 0x0070, 0x0020, 0x0066, 0x006f, 0x0072, 0x0020, 0x0061, 0x0020, 0x006c, 0x0069, 0x0073, 0x0074, 0x0020, 0x006f, 0x0066, 0x0020, 0x0063, 0x006f, 0x006d, 0x006d, 0x0061, 0x006e, 0x0064, 0x0073, 0x0000, 0xffff, 0x2000, 0x003a, 0x0020, 0x0000, 0xffff, 0x4000, 0x0055, 0x006e, 0x006b, 0x006e, 0x006f, 0x0077, 0x006e, 0x0020, 0x0043, 0x006f, 0x006d, 0x006d, 0x0061, 0x006e, 0x0064, 0x002e, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000
+:prog_ether_end
