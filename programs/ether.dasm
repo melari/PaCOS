@@ -1,0 +1,83 @@
+; X - current keyboard buffer pointer
+; Y - keyboard buffer pointer address 
+; Z - command buffer pointer
+
+SET Z, command_buffer
+
+SET A, mes_welcome
+JSR 8 ;printLine
+
+JSR 14 ;getKeyBufferAddress
+SET X, A
+SET Y, A
+ADD Y, 10
+
+:main
+SET A, mes_promt
+JSR 8  ;print
+JSR getInput
+JSR runCommand
+SET PC, main
+
+;void getInput(void)
+; Allows the user to enter some text into the terminal. Returns once ENTER has been pressed.
+; Length of string will not exceed the length of the command buffer.
+:getInput
+  SET PUSH, A
+
+  :.loop
+  IFE [Y], X
+    SET PC, .loop
+  
+  ;Check for special characters
+  IFE [X], 0x0011 ; enter
+    SET PC, .enter
+
+  IFE [X], 0x0010 ; backspace
+    SET PC, .backspace
+
+  SET [Z], [X]  ; Move into command buffer
+  ADD Z, 1
+
+  SET A, [X]
+  JSR 2 ;printChar  ;Display the character.
+
+  :.moveBuf
+  ADD X, 1
+  IFE X, Y      ;check for wrap around.
+    SUB X, 10
+  SET PC, .loop
+
+  :.enter
+  SET X, [Y]
+  SET [Z], 0  ; add NULL terminator to command buffer
+  SET Z, command_buffer
+  JSR 4       ; newLine
+  SET PC, .done  
+
+  :.backspace
+  JSR 32  ;deleteChar
+  SUB Z, 1
+  SET PC, .moveBuf
+
+  :.done
+  SET A, POP
+  SET PC, POP
+
+
+;void runCommand(void)
+; Runs the current command in the command buffer.
+:runCommand
+  SET A, mes_unknownCommand
+  JSR 10
+  SET PC, POP
+
+
+:s_VARIABLES
+
+:mes_welcome DAT "Ether Terminal Ready.", 0x000A, "Type help for a list of commands", 0x0000
+:mes_promt DAT 0xFFFF, 0x2000, ": ", 0x0000
+:mes_unknownCommand DAT 0xFFFF, 0x4000, "Unknown Command.", 0x0000
+
+:command_buffer DAT 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+:command_buffer_end ;50 chars.
