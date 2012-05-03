@@ -1,0 +1,7 @@
+JSR 16
+:loop
+JSR 18
+ADD [A], 0x1000
+IFE [A], 0
+  ADD [A], 0x1000
+SET PC, loop
