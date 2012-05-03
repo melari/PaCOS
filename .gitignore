@@ -1,2 +1,4 @@
 programs/make
 *.swp
+*.DAT
+*.obj
