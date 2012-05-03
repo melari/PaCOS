@@ -1,0 +1,30 @@
+SET B, 0xFFFF
+JSR 16
+SET C, A
+JSR 20
+SET X, A
+JSR 22
+SET Y, A
+JSR 24
+SET Z, 60
+DIV Z, A
+
+SET A, [Y]
+
+:next
+ADD B, 1
+IFE B, 10
+  SET B, 0
+ADD A, Z
+SET [X], B
+BOR [X], [C]
+ADD [X], 0x30
+SET PUSH, A
+SET A, [X]
+JSR 2
+SET A, POP
+
+:loop
+IFG [Y], A
+  SET PC, next
+SET PC, loop
